@@ -15,7 +15,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, List, Tuple
 
-from sagemaker_tune.search_space import Domain, is_log_space
+from sagemaker_tune.search_space import Domain, is_log_space, Categorical
 from sagemaker_tune.optimizer.schedulers.searchers.bayesopt.utils.debug_log \
     import DebugLogPrinter
 from sagemaker_tune.optimizer.schedulers.searchers.bayesopt.datatypes.hp_ranges_factory \
@@ -36,7 +36,7 @@ def _impute_default_config(default_config, configspace):
         if isinstance(hp_range, Domain):
             tp = hp_range.value_type
             if name not in default_config:
-                if tp == str:
+                if isinstance(hp_range, Categorical):
                     # For categorical: Pick first entry
                     new_config[name] = hp_range.categories[0]
                 else:

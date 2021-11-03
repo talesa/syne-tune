@@ -391,6 +391,7 @@ class Categorical(Domain):
 
     @property
     def value_type(self):
+        return type(self.categories[0])
         if isinstance(self.categories[0], int):
             return int
         else:
@@ -703,6 +704,10 @@ def from_dict(d: Dict) -> Domain:
     domain_kwargs = d["domain_kwargs"]
     sampler_cls = getattr(domain_cls, "_" + d["sampler_cls"])
     sampler_kwargs = d["sampler_kwargs"]
+
+    if "cast_str" in domain_kwargs:
+        domain_kwargs.pop("cast_str")
+
     domain = domain_cls(**domain_kwargs)
     sampler = sampler_cls(**sampler_kwargs)
     domain.set_sampler(sampler)
