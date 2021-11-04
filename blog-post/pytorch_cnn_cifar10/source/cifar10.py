@@ -43,24 +43,6 @@ class Net(nn.Module):
 
 
 def _train(args):
-    is_distributed = len(args.hosts) > 1 and args.dist_backend is not None
-    logger.debug("Distributed training - {}".format(is_distributed))
-
-    if is_distributed:
-        # Initialize the distributed environment.
-        world_size = len(args.hosts)
-        os.environ["WORLD_SIZE"] = str(world_size)
-        host_rank = args.hosts.index(args.current_host)
-        os.environ["RANK"] = str(host_rank)
-        dist.init_process_group(backend=args.dist_backend, rank=host_rank, world_size=world_size)
-        logger.info(
-            "Initialized the distributed environment: '{}' backend on {} nodes. ".format(
-                args.dist_backend, dist.get_world_size()
-            )
-            + "Current host rank is {}. Using cuda: {}. Number of gpus: {}".format(
-                dist.get_rank(), torch.cuda.is_available(), args.num_gpus
-            )
-        )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Device Type: {}".format(device))
@@ -175,8 +157,6 @@ if __name__ == "__main__":
         "--dist_backend", type=str, default="gloo", help="distributed backend (default: gloo)"
     )
 
-    parser.add_argument("--hosts", type=list, default=json.loads(os.environ.get('SM_HOSTS', None)))
-    parser.add_argument("--current-host", type=str, default=os.environ.get('SM_CURRENT_HOST', None))
     parser.add_argument("--model-dir", type=str, default=os.environ.get('SM_MODEL_DIR', "./"))
     parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./"))
 
