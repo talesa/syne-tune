@@ -15,11 +15,6 @@ import torchvision
 import torchvision.models
 import torchvision.transforms as transforms
 
-try:
-    from sagemaker_inference import environment
-except:
-    from sagemaker_training import environment
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
