@@ -175,11 +175,6 @@ if __name__ == "__main__":
         "--dist_backend", type=str, default="gloo", help="distributed backend (default: gloo)"
     )
 
-    env = environment.Environment()
-    print(env)
-    print(env.channel_input_dirs.get("training"))
-
-
     parser.add_argument("--hosts", type=list, default=json.loads(os.environ.get('SM_HOSTS', None)))
     parser.add_argument("--current-host", type=str, default=os.environ.get('SM_CURRENT_HOST', None))
     parser.add_argument("--model-dir", type=str, default=os.environ.get('SM_MODEL_DIR', "./"))
