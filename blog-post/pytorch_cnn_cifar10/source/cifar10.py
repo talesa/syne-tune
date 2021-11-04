@@ -79,9 +79,9 @@ def _train(args):
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
-    for epoch in tqdm(range(0, args.epochs), total=args.epochs):
+    for epoch in range(0, args.epochs):
         running_loss = 0.0
-        for i, data in enumerate(train_loader):
+        for i, data in tqdm(enumerate(train_loader), total=len(train_loader)):
             # get the inputs
             inputs, labels = data
             inputs, labels = inputs.to(device), labels.to(device)
