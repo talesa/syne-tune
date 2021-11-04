@@ -14,6 +14,7 @@ import torch.utils.data.distributed
 import torchvision
 import torchvision.models
 import torchvision.transforms as transforms
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -78,7 +79,7 @@ def _train(args):
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
-    for epoch in range(0, args.epochs):
+    for epoch in tqdm(range(0, args.epochs), total=args.epochs):
         running_loss = 0.0
         for i, data in enumerate(train_loader):
             # get the inputs
@@ -153,12 +154,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--momentum", type=float, default=0.9, metavar="M", help="momentum (default: 0.9)"
     )
-    parser.add_argument(
-        "--dist_backend", type=str, default="gloo", help="distributed backend (default: gloo)"
-    )
 
     parser.add_argument("--model-dir", type=str, default=os.environ.get('SM_MODEL_DIR', "./"))
-    parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./"))
+    parser.add_argument(
+        "--data-dir",
+        type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./data/"),
+        help="the folder containing cifar-10-batches-py/",
+    )
 
     # TODO num gpus
     parser.add_argument("--num-gpus", type=int, default=4)
