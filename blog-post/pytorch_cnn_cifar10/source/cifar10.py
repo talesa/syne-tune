@@ -4,7 +4,6 @@ import logging
 import os
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel
@@ -43,6 +42,23 @@ class Net(nn.Module):
         return x
 
 
+def compute_accuracy(model, data_loader, device):
+    model.eval()
+    loss = 0
+    correct = 0
+    for inputs, labels in data_loader:
+        with torch.no_grad():
+            inputs, labels = inputs.to(device), labels.to(device)
+            prediction = model(inputs)
+            loss += F.nll_loss(prediction, labels, reduction="sum")
+            prediction = prediction.max(1)[1]
+            correct += prediction.eq(labels.view_as(prediction)).sum().item()
+    n_valid = len(data_loader.sampler)
+    loss /= n_valid
+    percentage_correct = 100.0 * correct / n_valid
+    return loss, percentage_correct / 100
+
+
 def _train(args):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -56,15 +72,14 @@ def _train(args):
     trainset = torchvision.datasets.CIFAR10(
         root=args.data_dir, train=True, download=False, transform=transform
     )
+    n_train = len(trainset) * 8 / 10
+    n_val = len(trainset) - n_train
+    train_split, val_split = torch.utils.data.random_split(trainset, [n_train, n_val])
     train_loader = torch.utils.data.DataLoader(
-        trainset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
+        train_split, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
     )
-
-    testset = torchvision.datasets.CIFAR10(
-        root=args.data_dir, train=False, download=False, transform=transform
-    )
-    test_loader = torch.utils.data.DataLoader(
-        testset, batch_size=args.batch_size, shuffle=False, num_workers=args.workers
+    val_loader = torch.utils.data.DataLoader(
+        val_split, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
     )
 
     logger.info("Model loaded")
@@ -80,10 +95,10 @@ def _train(args):
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
     for epoch in range(0, args.epochs):
+        model.train()
         running_loss = 0.0
-        for i, data in tqdm(enumerate(train_loader), total=len(train_loader)):
+        for i, (inputs, labels) in tqdm(enumerate(train_loader), total=len(train_loader)):
             # get the inputs
-            inputs, labels = data
             inputs, labels = inputs.to(device), labels.to(device)
 
             # zero the parameter gradients
@@ -100,28 +115,10 @@ def _train(args):
             if i % 2000 == 1999:  # print every 2000 mini-batches
                 print("[%d, %5d] loss: %.3f" % (epoch + 1, i + 1, running_loss / 2000))
                 running_loss = 0.0
+        val_loss, val_acc = compute_accuracy(model=model, data_loader=val_loader, device=device)
+        print(f"val loss/accuracy: {val_loss}/{val_acc}")
     print("Finished Training")
-    return _save_model(model, args.model_dir)
 
-
-def _save_model(model, model_dir):
-    logger.info("Saving the model.")
-    path = os.path.join(model_dir, "model.pth")
-    # recommended way from http://pytorch.org/docs/master/notes/serialization.html
-    torch.save(model.cpu().state_dict(), path)
-
-
-def model_fn(model_dir):
-    logger.info("model_fn")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = Net()
-    if torch.cuda.device_count() > 1:
-        logger.info("Gpu count: {}".format(torch.cuda.device_count()))
-        model = nn.DataParallel(model)
-
-    with open(os.path.join(model_dir, "model.pth"), "rb") as f:
-        model.load_state_dict(torch.load(f))
-    return model.to(device)
 
 
 if __name__ == "__main__":
@@ -156,9 +153,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--model-dir", type=str, default=os.environ.get('SM_MODEL_DIR', "./"))
-    parser.add_argument(
-        "--data-dir",
-        type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./data/"),
+    parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./data/"),
         help="the folder containing cifar-10-batches-py/",
     )
 
