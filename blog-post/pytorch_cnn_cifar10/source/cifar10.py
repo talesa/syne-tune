@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 import os
 
@@ -14,6 +13,7 @@ import torchvision
 import torchvision.models
 import torchvision.transforms as transforms
 from tqdm import tqdm
+from sagemaker_tune.report import Reporter
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -44,23 +44,19 @@ class Net(nn.Module):
 
 def compute_accuracy(model, data_loader, device):
     model.eval()
-    loss = 0
     correct = 0
-    for inputs, labels in data_loader:
+    for inputs, labels in tqdm(data_loader):
         with torch.no_grad():
             inputs, labels = inputs.to(device), labels.to(device)
             prediction = model(inputs)
-            loss += F.nll_loss(prediction, labels, reduction="sum")
             prediction = prediction.max(1)[1]
             correct += prediction.eq(labels.view_as(prediction)).sum().item()
     n_valid = len(data_loader.sampler)
-    loss /= n_valid
     percentage_correct = 100.0 * correct / n_valid
-    return loss, percentage_correct / 100
+    return percentage_correct / 100
 
 
 def _train(args):
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Device Type: {}".format(device))
 
@@ -72,16 +68,17 @@ def _train(args):
     trainset = torchvision.datasets.CIFAR10(
         root=args.data_dir, train=True, download=False, transform=transform
     )
-    n_train = len(trainset) * 8 / 10
+    n_train = len(trainset) * 8 // 10
     n_val = len(trainset) - n_train
     train_split, val_split = torch.utils.data.random_split(trainset, [n_train, n_val])
     train_loader = torch.utils.data.DataLoader(
         train_split, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
     )
     val_loader = torch.utils.data.DataLoader(
-        val_split, batch_size=args.batch_size, shuffle=True, num_workers=args.workers
+        val_split, batch_size=128, shuffle=True, num_workers=args.workers
     )
 
+    logger.info(f"length training/validation splits: {len(train_split)}/{len(val_split)}")
     logger.info("Model loaded")
     model = Net()
 
@@ -94,7 +91,8 @@ def _train(args):
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 
-    for epoch in range(0, args.epochs):
+    reporter = Reporter()
+    for epoch in range(1, args.epochs + 1):
         model.train()
         running_loss = 0.0
         for i, (inputs, labels) in tqdm(enumerate(train_loader), total=len(train_loader)):
@@ -113,12 +111,11 @@ def _train(args):
             # print statistics
             running_loss += loss.item()
             if i % 2000 == 1999:  # print every 2000 mini-batches
-                print("[%d, %5d] loss: %.3f" % (epoch + 1, i + 1, running_loss / 2000))
+                print("[%d, %5d] loss: %.3f" % (epoch, i + 1, running_loss / 2000))
                 running_loss = 0.0
-        val_loss, val_acc = compute_accuracy(model=model, data_loader=val_loader, device=device)
-        print(f"val loss/accuracy: {val_loss}/{val_acc}")
+        val_acc = compute_accuracy(model=model, data_loader=val_loader, device=device)
+        reporter(epoch=epoch, val_acc=val_acc)
     print("Finished Training")
-
 
 
 if __name__ == "__main__":
