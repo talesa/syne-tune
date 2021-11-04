@@ -184,10 +184,13 @@ if __name__ == "__main__":
     print(env)
     print(env.channel_input_dirs.get("training"))
 
+
     parser.add_argument("--hosts", type=list, default=json.loads(os.environ.get('SM_HOSTS', None)))
     parser.add_argument("--current-host", type=str, default=os.environ.get('SM_CURRENT_HOST', None))
     parser.add_argument("--model-dir", type=str, default=os.environ.get('SM_MODEL_DIR', "./"))
-    parser.add_argument("--data-dir", type=str, default=env.channel_input_dirs.get("training"))
-    parser.add_argument("--num-gpus", type=int, default=env.num_gpus)
+    parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./"))
+
+    # TODO num gpus
+    parser.add_argument("--num-gpus", type=int, default=4)
 
     _train(parser.parse_args())
