@@ -150,6 +150,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--model-dir", type=str, default=os.environ.get('SM_MODEL_DIR', "./"))
+    parser.add_argument("--smt-checkpoint-dir", type=str, default="./")
     parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./data/"),
         help="the folder containing cifar-10-batches-py/",
     )
