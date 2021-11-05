@@ -190,7 +190,7 @@ class FIFOScheduler(ResourceLevelsScheduler):
         random_seed = kwargs.get('random_seed')
         if random_seed is None:
             random_seed = np.random.randint(0, 2 ** 32)
-        logger.info(f"Master random_seed = {random_seed}")
+        logger.debug(f"Master random_seed = {random_seed}")
         self.random_seed_generator = RandomSeedGenerator(random_seed)
         # Generate searcher
         searcher = kwargs['searcher']
