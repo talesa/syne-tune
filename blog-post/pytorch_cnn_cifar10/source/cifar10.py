@@ -150,6 +150,14 @@ if __name__ == "__main__":
         help="initial learning rate (default: 0.001)",
     )
     parser.add_argument(
+        "--dropout_rate",
+        type=float,
+        default=0.0,
+        metavar="DR",
+        help="dropout rate (default: 0.0)",
+    )
+
+    parser.add_argument(
         "--momentum", type=float, default=0.9, metavar="M", help="momentum (default: 0.9)"
     )
 
