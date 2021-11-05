@@ -6,16 +6,14 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.parallel
 import torch.optim
 import torch.utils.data
-import torch.utils.data.distributed
 import torchvision
 import torchvision.models
+from torchvision.models import resnet18
 import torchvision.transforms as transforms
 from tqdm import tqdm
 
-from sagemaker_tune.num_gpu import get_num_gpus
 from sagemaker_tune.report import Reporter
 
 logger = logging.getLogger(__name__)
@@ -29,22 +27,16 @@ class Net(nn.Module):
     def __init__(self, dropout_rate: float = 0.0):
         super(Net, self).__init__()
         assert 0 <= dropout_rate <= 1
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
+        self.resnet = resnet18(pretrained=False, num_classes=10)
+        self.resnet.conv1 = torch.nn.Conv2d(
+            3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.resnet.maxpool = torch.nn.Identity()
         self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 5 * 5)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = self.resnet(x)
         x = self.dropout(x)
-        x = self.fc3(x)
+        x = F.log_softmax(x, dim=1)
         return x
 
 
@@ -161,7 +153,6 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./data/"),
         help="the folder containing cifar-10-batches-py/",
     )
-    parser.add_argument("--num-gpus", type=int, default=get_num_gpus())
 
     args, _ = parser.parse_known_args()
 
