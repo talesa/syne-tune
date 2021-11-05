@@ -15,7 +15,7 @@ import torchvision.models
 import torchvision.transforms as transforms
 from tqdm import tqdm
 
-from sagemaker_tune import num_gpu
+from sagemaker_tune.num_gpu import get_num_gpus
 from sagemaker_tune.report import Reporter
 
 logger = logging.getLogger(__name__)
@@ -167,8 +167,9 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./data/"),
         help="the folder containing cifar-10-batches-py/",
     )
-    parser.add_argument("--num-gpus", type=int, default=num_gpu())
+    parser.add_argument("--num-gpus", type=int, default=get_num_gpus())
 
     args, _ = parser.parse_known_args()
 
+    print(args.__dict__)
     _train(args)
