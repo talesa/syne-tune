@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import os
 
@@ -23,14 +24,16 @@ classes = ("plane", "car", "bird", "cat", "deer", "dog", "frog", "horse", "ship"
 
 # https://github.com/pytorch/tutorials/blob/master/beginner_source/blitz/cifar10_tutorial.py#L118
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout_rate: float = 0.0):
         super(Net, self).__init__()
+        assert 0 <= dropout_rate <= 1
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
+        self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
@@ -38,6 +41,7 @@ class Net(nn.Module):
         x = x.view(-1, 16 * 5 * 5)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
+        x = self.dropout(x)
         x = self.fc3(x)
         return x
 
@@ -80,7 +84,7 @@ def _train(args):
 
     logger.info(f"length training/validation splits: {len(train_split)}/{len(val_split)}")
     logger.info("Model loaded")
-    model = Net()
+    model = Net(dropout_rate=args.dropout_rate)
 
     if torch.cuda.device_count() > 1:
         logger.info("Gpu count: {}".format(torch.cuda.device_count()))
