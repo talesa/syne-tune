@@ -115,7 +115,7 @@ def check_and_merge_defaults(
                     log_msg += (prefix + "Key '{}' in dict {}: Imputing default value {}\n".format(kd, key, vd))
                     result_dict[kd] = vd
     if log_msg:
-        logger.info(log_msg)
+        logger.debug(log_msg)
     # Check constraints
     if constraints:
         for key, value in result_options.items():
