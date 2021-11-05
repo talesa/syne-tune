@@ -85,13 +85,7 @@ def _train(args):
     )
 
     logger.info(f"length training/validation splits: {len(train_split)}/{len(val_split)}")
-    logger.info("Model loaded")
     model = Net(dropout_rate=args.dropout_rate)
-
-    if torch.cuda.device_count() > 1:
-        logger.info("Gpu count: {}".format(torch.cuda.device_count()))
-        model = nn.DataParallel(model)
-
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss().to(device)
