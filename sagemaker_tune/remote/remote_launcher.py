@@ -39,6 +39,7 @@ class RemoteLauncher:
             dependencies: Optional[List[str]] = None,
             framework: Optional[str] = None,
             estimator_kwargs: Optional[dict] = None,
+            estimator_inputs: Optional[str] = None,
             store_logs_localbackend: bool = False,
             log_level: Optional[int] = None,
             s3_path: Optional[str] = None,
@@ -61,6 +62,7 @@ class RemoteLauncher:
             NOTE: SkLearn as default may be a more lightweight choice
         :param estimator_kwargs: Extra arguments for creating the SageMaker
             estimator for the tuning code. Depends on framework
+        :param estimator_inputs: Inputs arguments to be passed to the fit method of the estimator.
         :param store_logs_localbackend: whether to store logs of trials when using the local backend.
             When using Sagemaker backend, logs are persisted by Sagemaker.
         :param log_level: Logging level. Default is logging.INFO, while
@@ -90,6 +92,7 @@ class RemoteLauncher:
         k = 'framework_version'
         if self.framework == 'PyTorch' and k not in estimator_kwargs:
             estimator_kwargs[k] = '1.6'
+        self.estimator_inputs = estimator_inputs
         self.estimator_kwargs = estimator_kwargs
         self.store_logs_localbackend = store_logs_localbackend
         self.log_level = log_level
@@ -231,7 +234,7 @@ class RemoteLauncher:
             tuner_estimator.dependencies += self.dependencies
 
         # launches job on Sagemaker
-        return tuner_estimator.fit(wait=wait, job_name=self.tuner.name)
+        return tuner_estimator.fit(wait=wait, job_name=self.tuner.name, inputs=self.estimator_inputs)
 
     def sagemaker_tune_image_uri(self) -> str:
         """

@@ -87,7 +87,7 @@ if __name__ == '__main__':
             # Extra arguments describing the ressource of the remote tuning instance and whether we want to wait
             # the tuning to finish. The instance-type where the tuning job runs can be different than the
             # instance-type used for evaluating the training jobs.
-            instance_type='local',
+            instance_type='ml.m5.large',
         )
 
         tuner.run(wait=False)
