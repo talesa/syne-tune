@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 if "OMP_NUM_THREADS" not in os.environ:
-    logger.debug("OMP_NUM_THREADS is not set, it is going to be set to 1 to avoid performance issues in case of many "
+    logger.info("OMP_NUM_THREADS is not set, it is going to be set to 1 to avoid performance issues in case of many "
                  "workers are used locally. Overrides this behavior by setting a custom value.")
     os.environ["OMP_NUM_THREADS"] = "1"
 
