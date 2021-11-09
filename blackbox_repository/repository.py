@@ -9,35 +9,16 @@ from blackbox_repository.blackbox_offline import deserialize as deserialize_offl
 from blackbox_repository.blackbox_tabular import deserialize as deserialize_tabular
 
 # where the blackbox repository is stored on s3
-s3_blackbox_folder = f"{sagemaker.Session().default_bucket()}/blackbox-repository"
-
-repository_path = Path("~/.blackbox-repository/").expanduser()
+from blackbox_repository.conversion_scripts.recipes import generate_blackbox_recipe
+from blackbox_repository.conversion_scripts.utils import repository_path, s3_blackbox_folder
 
 
 def blackbox_list() -> List[str]:
     """
     :return: list of blackboxes available
     """
-    fs = s3fs.S3FileSystem()
-    return sorted(list(set([
-        Path(x).parent.name
-        for x in fs.glob(f"s3://{s3_blackbox_folder}/*/*.parquet")
-    ])))
+    return list(generate_blackbox_recipe.keys())
 
-
-def upload(name: str):
-    """
-    Uploads a blackbox locally present in repository_path to S3.
-    :param name: folder must be available in repository_path/name
-    """
-    # test that blackbox can be retrieved before uploading it
-    load(name)
-
-    fs = s3fs.S3FileSystem()
-    for src in Path(repository_path / name).glob("*"):
-        tgt = f"s3://{s3_blackbox_folder}/{name}/{src.name}"
-        print(f"copy {src} to {tgt}")
-        fs.put(str(src), tgt)
 
 
 def load(name: str, skip_if_present: bool = True) -> BlackboxOffline:
@@ -47,16 +28,22 @@ def load(name: str, skip_if_present: bool = True) -> BlackboxOffline:
     :return: blackbox with the given name, download it if not present.
     """
     tgt_folder = Path(repository_path) / name
-    tgt_folder.mkdir(exist_ok=True)
     if tgt_folder.exists() and skip_if_present:
         print(f"skipping download of {name} as {tgt_folder} already exists, change skip_if_present to redownload")
     else:
-        # download files from s3 to repository_path
+        tgt_folder.mkdir(exist_ok=True, parents=True)
         fs = s3fs.S3FileSystem()
-        for src in fs.glob(f"{s3_blackbox_folder}/{name}/*"):
-            tgt = tgt_folder / Path(src).name
-            print(f"copying {src} to {tgt}")
-            fs.get(src, str(tgt))
+        data_on_s3 = fs.exists(f"{s3_blackbox_folder}/{name}/metadata.json")
+        if data_on_s3:
+            # download files from s3 to repository_path
+            for src in fs.glob(f"{s3_blackbox_folder}/{name}/*"):
+                tgt = tgt_folder / Path(src).name
+                print(f"copying {src} to {tgt}")
+                fs.get(src, str(tgt))
+        else:
+            print("did not find blackbox files locally nor on s3, regenerating it locally and persisting it on S3.")
+            generate_blackbox_recipe[name]()
+
     if (tgt_folder / "hyperparameters.parquet").exists():
         return deserialize_tabular(tgt_folder)
     else:
@@ -68,8 +55,8 @@ if __name__ == '__main__':
     blackboxes = blackbox_list()
     print(blackboxes)
 
-    # download an existing blackbox
-    blackbox = load(blackboxes[0])
-
-    # upload a blackbox stored locally to the repository
-    # upload(blackboxes[0])
+    for bb in blackboxes:
+        print(bb)
+        # download an existing blackbox
+        blackbox = load(bb)
+        print(blackbox)

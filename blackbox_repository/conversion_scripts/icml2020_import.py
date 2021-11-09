@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from blackbox_repository.blackbox_offline import serialize, BlackboxOffline
-from blackbox_repository.repository import repository_path, load, upload
+from blackbox_repository.conversion_scripts.utils import repository_path, upload
 import sagemaker_tune.search_space as sp
 
 
@@ -85,12 +85,16 @@ def serialize_xgboost():
     )
 
 
-if __name__ == '__main__':
+def generate_deepar():
     serialize_deepar()
-    print(load("icml-deepar"))
-
-    serialize_xgboost()
-    print(load("icml-xgboost"))
-
     upload(name="icml-deepar")
+
+
+def generate_xgboost():
+    serialize_xgboost()
     upload(name="icml-xgboost")
+
+
+if __name__ == '__main__':
+    generate_deepar()
+    generate_xgboost()

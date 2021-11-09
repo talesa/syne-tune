@@ -13,7 +13,7 @@ from tqdm import tqdm as tqdm
 
 from blackbox_repository.blackbox_tabular import serialize, BlackboxTabular
 import sagemaker_tune.search_space as sp
-from blackbox_repository.repository import repository_path, upload, load
+from blackbox_repository.conversion_scripts.utils import repository_path, upload
 from sagemaker_tune.util import catchtime
 
 
@@ -113,7 +113,7 @@ def convert_dataset(dataset_path: Path, max_rows: int = None):
     )
 
 
-if __name__ == '__main__':
+def generate_fcnet():
     blackbox_name = "fcnet"
     fcnet_file = Path(__file__).parent / "fcnet_tabular_benchmarks.tar.gz"
     if not (repository_path / "fcnet_tabular_benchmarks.tar.gz").exists():
@@ -124,31 +124,27 @@ if __name__ == '__main__':
     with tarfile.open(repository_path / "fcnet_tabular_benchmarks.tar.gz") as f:
         f.extractall(path=repository_path)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--max_rows', type=int, required=False,
-        default=None, help="generate dataset with small number of rows for debugging, optional"
-    )
-
-    args = parser.parse_args()
-    max_rows = args.max_rows
-
     with catchtime("converting"):
         bb_dict = {}
         for dataset in ['protein_structure', 'naval_propulsion', 'parkinsons_telemonitoring', 'slice_localization']:
             print(f"converting {dataset}")
             dataset_path = repository_path / "fcnet_tabular_benchmarks" / f"fcnet_{dataset}_data.hdf5"
-            bb_dict[dataset] = convert_dataset(dataset_path=dataset_path, max_rows=max_rows)
+            bb_dict[dataset] = convert_dataset(dataset_path=dataset_path)
 
     with catchtime("saving to disk"):
         serialize(bb_dict=bb_dict, path=repository_path / blackbox_name)
 
     with catchtime("uploading to s3"):
-        # TODO sagemaker bucket
-        upload(blackbox_name, profile="mnemosyne-team")
+        from blackbox_repository.conversion_scripts.utils import upload
+        upload(blackbox_name)
 
+
+if __name__ == '__main__':
+    generate_fcnet()
+
+    from blackbox_repository import load
     # plot one learning-curve for sanity-check
-    bb_dict = load(blackbox_name)
+    bb_dict = load("fcnet")
 
     b = bb_dict['naval_propulsion']
     configuration = {k: v.sample() for k, v in b.configuration_space.items()}

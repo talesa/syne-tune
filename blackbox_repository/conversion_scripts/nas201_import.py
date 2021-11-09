@@ -6,7 +6,7 @@ import s3fs
 
 import sagemaker_tune.search_space as sp
 from blackbox_repository.blackbox_tabular import BlackboxTabular, serialize
-from blackbox_repository.repository import repository_path, upload, load
+from blackbox_repository.conversion_scripts.utils import repository_path, upload
 
 
 def load_nas201_df():
@@ -90,7 +90,7 @@ def plot_learning_curve():
     plt.show()
 
 
-if __name__ == '__main__':
+def generate_nas201():
     df = load_nas201_df()
     bb_dict = {}
     for dataset in sorted(df.dataset.unique()):
@@ -101,4 +101,7 @@ if __name__ == '__main__':
 
     upload("nas201")
 
+
+if __name__ == '__main__':
+    generate_nas201()
     plot_learning_curve()
