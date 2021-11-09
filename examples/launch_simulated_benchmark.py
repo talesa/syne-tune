@@ -35,6 +35,9 @@ def example_blackbox():
         n_epochs,
         num_objectives
     )
+    # dummy runtime
+    for t in range(0, n_epochs):
+        objectives_evaluations[:, :, t, 1] = 60 * (t + 1)
     return add_surrogate(BlackboxTabular(
         hyperparameters=hyperparameters,
         configuration_space=config_space,
@@ -45,18 +48,18 @@ def example_blackbox():
 
 
 if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.WARNING)
+    logging.getLogger().setLevel(logging.INFO)
 
     n_workers = 4
 
-    blackbox_name, dataset, metric, elapsed_time_attr = "nas201", "cifar100", "metric_error", 'metric_runtime'
-    blackbox = load(blackbox_name)[dataset]
+    # blackbox_name, dataset, metric, elapsed_time_attr = "nas201", "cifar100", "metric_error", 'metric_runtime'
+    # blackbox = load(blackbox_name)[dataset]
 
     # blackbox_name, dataset, metric, elapsed_time_attr = "fcnet", "protein_structure", "metric_valid_loss", "metric_runtime"
     # blackbox = load(blackbox_name)[dataset]
 
-    # blackbox = example_blackbox()
-    # elapsed_time_attr, metric = "runtime", "metric_error"
+    blackbox = example_blackbox()
+    elapsed_time_attr, metric = "runtime", "metric_error"
 
     backend = TabulatedBenchmark(
         blackbox=blackbox,
@@ -74,7 +77,7 @@ if __name__ == '__main__':
         random_seed=31415927
     )
 
-    stop_criterion = StoppingCriterion(max_wallclock_time=72000)
+    stop_criterion = StoppingCriterion(max_wallclock_time=7200)
 
     # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
     tuner = Tuner(
