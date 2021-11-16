@@ -29,6 +29,21 @@ def get_test_data_loader():
     return torch.utils.data.DataLoader(testset, batch_size=4, shuffle=False, num_workers=2)
 
 
+def get_train_data_loader_cifar100():
+    transform = _get_transform()
+    trainset = torchvision.datasets.CIFAR100(
+        root="./data", train=True, download=True, transform=transform
+    )
+    return torch.utils.data.DataLoader(trainset, batch_size=4, shuffle=True, num_workers=2)
+
+
+def get_test_data_loader_cifar100():
+    transform = _get_transform()
+    testset = torchvision.datasets.CIFAR100(
+        root="./data", train=False, download=True, transform=transform
+    )
+    return torch.utils.data.DataLoader(testset, batch_size=4, shuffle=False, num_workers=2)
+
 # function to show an image
 def imshow(img):
     img = img / 2 + 0.5  # unnormalize
