@@ -148,7 +148,6 @@ if __name__ == "__main__":
         "--momentum", type=float, default=0.9, metavar="M", help="momentum (default: 0.9)"
     )
 
-    parser.add_argument("--model-dir", type=str, default=os.environ.get('SM_MODEL_DIR', "./"))
     parser.add_argument("--data-dir", type=str, default=os.environ.get('SM_CHANNEL_TRAINING', "./data/"),
         help="the folder containing cifar-10-batches-py/",
     )
