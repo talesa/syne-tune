@@ -431,7 +431,8 @@ def sample_posterior_joint(
         vvec = solve_triangular(lfact, rhs, lower=True)  # v
         vtv = _squared_norm(vvec)  # alpha
         # w_hat - w
-        w_delta = solve_triangular(lfact, targets_obs - targets_samp)
+        w_delta = solve_triangular(
+            lfact, targets_obs - targets_samp, lower=True)
         kappa = post_variance / noise_variance
         fact = kappa / (vtv * kappa + 1.0)
         # rho_hat - rho
