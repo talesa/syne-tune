@@ -166,7 +166,7 @@ An important part of this script is the definition of `config_space`, the
 configuration space (or search space). [This tutorial](docs/search_space.md)
 provides some advice on this choice.
 
-Using the local backend `LocalBackend(entry_point=...)` allows to run the trials (4 at the same time) 
+Using the local backend `LocalBackend(entry_point=...)` allows to run the trials (in this case, 4 at the same time) 
 on the local machine. If instead, users prefer to evaluate trials on SageMaker, then SageMaker backend 
 can be used which allow to tune any SageMaker Framework (see 
 [launch_height_sagemaker.py](examples/launch_height_sagemaker.py) for an example), 
@@ -254,7 +254,7 @@ tuner = Tuner(
 tuner.run()
 ```
 runs a tuning by evaluating 4 configurations in parallel with a given backend/scheduler and stops after 600s.
-Tuner appends a unique string to ensure unicity of tuner name (with the above example the id
+Tuner appends a datetime string to ensure uniqueness of the tuner name (with the above example the id
  of the experiment may be `height-tuning-2021-07-02-10-04-37-233`). 
  Results are updated every 30 seconds by default which is configurable.
 
@@ -274,7 +274,7 @@ class ExperimentResult:
     metadata: Dict
     tuner: Tuner
 ```
-Where metadata contains the metadata provided by the user (`{'description': 'just an example'} in this case) as well`
+where `metadata` contains the metadata provided by the user (`{'description': 'just an example'}` in this case) as well
  as `st_tuner_creation_timestamp` which stores the time-stamp when the tuning actually started.
 
 **Output of a tuning job when running tuning on SageMaker.**
@@ -335,8 +335,8 @@ If you want to launch experiments on SageMaker rather than on your local machine
  you will need access to AWS and SageMaker on your machine. 
  
 Make sure that:
-* `awscli` is installed (see [this link](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html))
-* `docker` is installed and running (see [this link](https://docs.docker.com/get-docker/))
+* `awscli` is installed (see [this link](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html), for MacOS `brew install awscli`)
+* `docker` is installed and running (see [this link](https://docs.docker.com/get-docker/), for MacOS `brew install --cask docker` and run it)
 * A SageMaker role have been created (see 
  [this page](https://docs.aws.amazon.com/glue/latest/dg/create-an-iam-role-sagemaker-notebook.html) for instructions if 
  you created a SageMaker notebook in the past, this role should have been created for you).
