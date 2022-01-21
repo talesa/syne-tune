@@ -11,6 +11,7 @@ class Blackbox:
             self,
             configuration_space: Dict,
             fidelity_space: Optional[Dict] = None,
+            fidelity_values: Optional[np.array] = None,
             objectives_names: Optional[List[str]] = None,
     ):
         """
@@ -18,6 +19,7 @@ class Blackbox:
         """
         self.configuration_space = configuration_space
         self.fidelity_space = fidelity_space
+        self.fidelity_values = fidelity_values
         self.objectives_names = objectives_names
 
     def objective_function(
@@ -86,18 +88,12 @@ class Blackbox:
         """
         pass
 
-    @property
-    def fidelity_values(self) -> Optional[np.array]:
-        """
-        :return: Fidelity values; or None if the blackbox has none
-        """
-        return None
-
 
 def from_function(
         configuration_space: Dict,
         eval_fun: Callable,
         fidelity_space: Optional[Dict] = None,
+        fidelity_values = None,
         objectives_names: Optional[List[str]] = None,
 ):
     """
@@ -112,7 +108,8 @@ def from_function(
             super(BB, self).__init__(
                 configuration_space=configuration_space,
                 fidelity_space=fidelity_space,
-                objectives_names=objectives_names
+                fidelity_values=fidelity_values,
+                objectives_names=objectives_names,
             )
 
         def objective_function(

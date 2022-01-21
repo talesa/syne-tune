@@ -46,7 +46,6 @@ class InstanceInfos:
             cost_per_hour=row['price'].values[0],
         )
 
-
 def select_instance_type(
         min_gpu: int = 0,
         max_gpu: int = 16,

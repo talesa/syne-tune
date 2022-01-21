@@ -34,7 +34,8 @@ class BlackboxTabular(Blackbox):
         super(BlackboxTabular, self).__init__(
             configuration_space=configuration_space,
             fidelity_space=fidelity_space,
-            objectives_names=objectives_names
+            objectives_names=objectives_names,
+            fidelity_values=fidelity_values,
         )
         # todo missing-value support, should boils down to droping nans in `hyperparameter_objectives_values`
         num_hps = len(hyperparameters.columns)
@@ -45,14 +46,14 @@ class BlackboxTabular(Blackbox):
         self.num_seeds = num_seeds
         self.num_fidelities = num_fidelities
         if fidelity_values is None:
-            self._fidelity_values = np.arange(num_fidelities) + 1
+            self.fidelity_values = np.arange(num_fidelities) + 1
         else:
             # assert sorted(fidelity_values.tolist()) == fidelity_values
-            self._fidelity_values = fidelity_values
+            self.fidelity_values = fidelity_values
 
         # allows to retrieve the index in the objectives_evaluations of a given fidelity
         self.fidelity_map = {
-            value: index for index, value in enumerate(self._fidelity_values)
+            value: index for index, value in enumerate(self.fidelity_values)
         }
         self.hyperparameters = hyperparameters
 
@@ -71,7 +72,7 @@ class BlackboxTabular(Blackbox):
 
         assert len(self.objectives_evaluations) == len(hyperparameters)
         assert len(fidelity_space) == 1, "only support single fidelity for now"
-        assert max(self._fidelity_values) <= list(fidelity_space.values())[0].upper, f"{max(self._fidelity_values)}, {fidelity_space.get_hyperparameters()[0].upper}"
+        assert max(self.fidelity_values) <= list(fidelity_space.values())[0].upper, f"{max(self.fidelity_values)}, {fidelity_space.get_hyperparameters()[0].upper}"
         assert len(hyperparameters) == len(hyperparameters.drop_duplicates()), "some hps are duplicated, use a seed column"
         assert len(configuration_space) == num_hps
         for name in configuration_space.keys():
@@ -110,10 +111,6 @@ class BlackboxTabular(Blackbox):
             fidelity_index = self.fidelity_map[list(fidelity.values())[0]]
             objectives_values = self.objectives_evaluations[index, seed, fidelity_index, :]
             return dict(zip(self.objectives_names, objectives_values))
-
-    @property
-    def fidelity_values(self) -> np.array:
-        return self._fidelity_values
 
     def hyperparameter_objectives_values(self):
         """
