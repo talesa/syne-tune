@@ -26,41 +26,163 @@ from syne_tune.optimizer.baselines import RandomSearch
 from syne_tune.remote.remote_launcher import RemoteLauncher
 from syne_tune.tuner import Tuner
 from syne_tune.stopping_criterion import StoppingCriterion
+from syne_tune.search_space import loguniform, choice, randint
+from syne_tune.backend.sagemaker_backend.instance_info import select_instance_type
 
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
-    
+
     # We pick the DistilBERT on IMDB benchmark
     # The 'benchmark' dict contains arguments needed by scheduler and
     # searcher (e.g., 'mode', 'metric'), along with suggested default values
     # for other arguments (which you are free to override)
-    random_seed = 31415927
-    n_workers = 1
+
     default_params = distilbert_imdb_default_params()
     benchmark = distilbert_imdb_benchmark(default_params)
     mode = benchmark['mode']
     metric = benchmark['metric']
-    config_space = benchmark['config_space']
+    # config_space = benchmark['config_space']
+
+    # EDIT THIS SECTION
+    random_seed = 31415927
+
+    # instance_types = select_instance_type(min_gpu=1, max_cost_per_hour=10.0)
+    instance_types = [
+        'ml.p3.2xlarge',
+        'ml.p2.xlarge',
+        'ml.p2.8xlarge',
+        'ml.g4dn.xlarge',
+        'ml.g4dn.2xlarge',
+        'ml.g4dn.4xlarge',
+        'ml.g4dn.8xlarge',
+        'ml.g4dn.12xlarge',
+        'ml.g5.xlarge',
+        'ml.g5.2xlarge',
+        'ml.g5.4xlarge',
+        'ml.g5.8xlarge',
+        'ml.g5.12xlarge',
+        'ml.g5.24xlarge',
+    ]
+
+    #       GPU  RAM
+    # g4dn T4   16GB
+    # g5   A10G 24GB
+    # p2   K80  24GB
+    # p3   V100 32GB
+    # p4d  A100 40GB
+
+    # tuner_job_name = 'test-g4dn-bs-26'
+    # tuner_job_name = 'speed-bs-it'
+    # n_workers = 5
+    # config_space = dict(
+    #     per_device_train_batch_size=choice([4, 8, 12, 16, 20, 24, 28, 30, 32]),  # TODO select me
+    #     # per_device_train_batch_size=26,
+    #     n_train_data=384*16,
+    #     epochs=1,
+    #     per_device_eval_batch_size=32,
+    #     n_eval_data=32,
+    #     log_interval=0,
+    #     eval_interval=0,
+    #     learning_rate=1e-6,
+    #     weight_decay=1e-6,
+    #     dataloader_num_workers=0,
+    #     st_instance_type=choice(instance_types),  # TODO select me
+    #     # st_instance_type='ml.g4dn.xlarge',
+    #     max_resource_level=default_params['max_resource_level'])
+    # single_job_max_run = 15*60  # 15min
+    # # single_job_max_run = 60 * 60  # 15min
+    # stop_criterion = StoppingCriterion(
+    #     max_wallclock_time=10 * 60 * 60,  # 10h
+    #     max_num_trials_completed=1000,)
+        # max_num_trials_completed=1,)
+
+    tuner_job_name = 'loss-lr-wd-bs-2'
+    n_workers = 5
+    config_space = dict(
+        # per_device_train_batch_size=randint(4, 16),
+        per_device_train_batch_size=choice([2, 4, 8, 12, 16]),
+        n_train_data=25000,
+        epochs=3,
+        per_device_eval_batch_size=32,
+        n_eval_data=8192,
+        log_interval=100,
+        eval_interval=0,
+        learning_rate=loguniform(1e-7, 1e-4),
+        weight_decay=loguniform(1e-6, 1e-2),
+        dataloader_num_workers=1,
+        st_instance_type='ml.g4dn.xlarge',
+        # dataset_path=default_params['dataset_path'],
+        # keep_in_memory=0,
+        max_resource_level=default_params['max_resource_level'])
+    single_job_max_run = 90*60  # 90min
+    stop_criterion = StoppingCriterion(
+        max_wallclock_time=10 * 60 * 60,  # 10h
+        max_num_trials_completed=100)
+
+    # tuner_job_name = 'dataloader-num-workers'
+    # points_to_evaluate = [dict(
+    #     learning_rate=1e-6,
+    #     weight_decay=1e-6,
+    #     dataloader_num_workers=dataloader_num_workers,
+    #     # st_instance_type=choice(instance_types),
+    #     epochs=epochs,
+    #     # dataset_path=default_params['dataset_path'],
+    #     keep_in_memory=False,
+    #     log_interval=0,
+    #     eval_interval=0,
+    #     max_steps=default_params['max_resource_level']) for dataloader_num_workers in range(5)]
+
+    # tuner_job_name = 'keep-in-memory-true'
+    # points_to_evaluate = [dict(
+    #     learning_rate=1e-6,
+    #     weight_decay=1e-6,
+    #     dataloader_num_workers=0,
+    #     # st_instance_type=choice(instance_types),
+    #     epochs=1,
+    #     # dataset_path=default_params['dataset_path'],
+    #     keep_in_memory=True,
+    #     log_interval=100,
+    #     eval_interval=0,
+    #     max_steps=default_params['max_resource_level']) for dataloader_num_workers in range(1)]
+    #
+    # n_workers = len(points_to_evaluate)
+
+    metrics_to_be_defined = ('loss', 'learning_rate', 'epoch', 'eval_loss', 'eval_accuracy', 'eval_runtime',
+                             'eval_samples_per_second', 'train_runtime', 'train_samples_per_second', 'elapsed_time')
+    metric_definitions = [{'Name': k, 'Regex': f'{k}=([0-9\.]+)'} for k in metrics_to_be_defined]
 
     # Define Hugging Face SageMaker estimator
     root = Path(syne_tune.__path__[0]).parent
     huggingface_estimator = HuggingFace(
         entry_point=str(benchmark['script']),
+        # source_dir=str(script_path.parent)
+        # TODO you can try with instance-type='local'
+        # TODO make use of launch_hpo.py
         base_job_name='hpo-transformer',
-        instance_type='ml.g4dn.12xlarge',
+        instance_type='ml.g5.xlarge',  # instance-type given here are override by value sampled from `st_instance_type`.
+        max_run=single_job_max_run,  # timeout after 15min
         instance_count=1,
         transformers_version='4.4',
         pytorch_version='1.6',
         py_version='py36',
         role=get_execution_role(),
         dependencies=[root / "benchmarks"],
+        metric_definitions=metric_definitions,
+        # environment=dict(HF_DATASETS_OFFLINE='1', TRANSFORMERS_OFFLINE='1',),
+                         # TRANSFORMERS_CACHE='/opt/ml/input/data/hfcache'),
+        disable_profiler=True,
+        debugger_hook_config=False,
     )
 
     # SageMaker backend
     backend = SagemakerBackend(
         sm_estimator=huggingface_estimator,
         metrics_names=[metric],
+        inputs={
+            'train':   's3://sagemaker-us-west-2-640549960621/samples/datasets/launch_huggingface_sweep_ag/train',
+            'eval':    's3://sagemaker-us-west-2-640549960621/samples/datasets/launch_huggingface_sweep_ag/eval',
+            'hfcache': 's3://sagemaker-us-west-2-640549960621/samples/hfcache'},
     )
 
     # Random search without stopping
@@ -68,26 +190,25 @@ if __name__ == '__main__':
         config_space,
         mode=mode,
         metric=metric,
-        random_seed=random_seed
+        random_seed=random_seed,
+        # points_to_evaluate=points_to_evaluate,  # TODO dont miss this
     )
 
-    stop_criterion = StoppingCriterion(max_wallclock_time=20*60, max_num_trials_completed=1)
     tuner = Tuner(
         backend=backend,
         scheduler=scheduler,
         stop_criterion=stop_criterion,
         n_workers=n_workers,
+        tuner_name=tuner_job_name,
+        max_failures=10000000,
     )
+    # tuner.run()
 
-    remote_tuner = RemoteLauncher(
+    remote_launcher = RemoteLauncher(
         tuner=tuner,
-        dependencies=dependencies,
-        instance_type=instance_type,
-        log_level=log_level,
-        s3_path=s3_path,
-        no_tuner_logging=params['no_tuner_logging'],
-        **estimator_kwargs,
+        instance_type='ml.m5.large',  # TODO you can use instance_type='local'
+        tuner_name=tuner_job_name,
+        dependencies=[str(root / "benchmarks")],
+        sleep_time=5.0,
     )
-    tuner.run(wait=False)
-
-    tuner.run()
+    remote_launcher.run(wait=False)
