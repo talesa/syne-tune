@@ -19,7 +19,7 @@ x1 = np.arange(n)
 x2 = np.arange(n)[::-1]
 
 cs = {
-    "hp_x1": sp.randint(0, n),
+    "hp_x1": sp.finrange(0, n, int(n/2)),
     "hp_x2": sp.randint(0, n),
 }
 
