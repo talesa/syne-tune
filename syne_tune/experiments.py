@@ -124,15 +124,21 @@ def load_experiment(
         download_if_not_found: bool = True,
         load_tuner: bool = False,
         local_path: Optional[str] = None,
+        force_download: bool = False,
 ) -> ExperimentResult:
     """
     :param tuner_name: name of a tuning experiment previously run
     :param download_if_not_found: whether to fetch the experiment from s3 if not found locally
     :param load_tuner: whether to load the tuner in addition to metadata and results
     :param local_path: path containing the experiment to load if not specified, then `~/{SYNE_TUNE_FOLDER}/` is used.
+    :param force_download: whether to force fetching the experiment from s3 even if found locally
     :return:
     """
     path = experiment_path(tuner_name, local_path)
+
+    if force_download and download_if_not_found:
+        logging.info(f"force_download=True so trying to download experiment {tuner_name} from s3.")
+        download_single_experiment(tuner_name=tuner_name)
 
     metadata_path = path / "metadata.json"
     if not(metadata_path.exists()) and download_if_not_found:

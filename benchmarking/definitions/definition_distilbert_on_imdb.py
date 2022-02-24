@@ -27,19 +27,21 @@ def distilbert_imdb_default_params(params=None):
         'framework': 'HuggingFace',
         'framework_version': '4.4',
         'pytorch_version': '1.6',
-        'dataset_path': './'
+        # 'dataset_path': 's3://sagemaker-us-west-2-640549960621/samples/datasets/launch_huggingface_sweep_ag/',  # './'
     }
 
 
 def distilbert_imdb_benchmark(params):
     config_space = dict(
         _config_space,
-        dataset_path=params['dataset_path'],
+        # dataset_path=params['dataset_path'],
         max_steps=params['max_resource_level'])
     return {
         'script':  Path(__file__).parent.parent / "training_scripts" / "distilbert_on_imdb" / "distilbert_on_imdb.py",
         'metric': METRIC_ACCURACY,
         'mode': 'max',
+        # 'metric': 'loss',
+        # 'mode': 'min',
         'resource_attr': RESOURCE_ATTR,
         'max_resource_attr': 'epochs',
         'config_space': config_space,

@@ -53,7 +53,7 @@ class SageMakerBackend(TrialBackend):
         :param s3_path: S3 base path used for checkpointing. The full path
             also involves the tuner name and the trial_id
         :param sagemaker_fit_kwargs: extra arguments that are passed to sagemaker.estimator.Framework when fitting the
-        job, for instance `{'train': 's3://my-data-bucket/path/to/my/training/data'}`
+        job, for instance `inputs={'train': 's3://my-data-bucket/path/to/my/training/data'}`
         """
         assert not delete_checkpoints, \
             "delete_checkpoints=True not yet supported for SageMaker backend"

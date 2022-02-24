@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Sequence
 import pandas as pd
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import Pipeline, FeatureUnion, make_pipeline
@@ -33,13 +33,15 @@ class BlackboxSurrogate(Blackbox):
             surrogate=None,
             max_fit_samples: Optional[int] = None,
             name: Optional[str] = None,
+            hps_to_exclude: Optional[Sequence[str]] = tuple(),
     ):
         """
         Fits a blackbox surrogates that can be evaluated anywhere, which can be useful for supporting
         interpolation/extrapolation. To wrap an existing blackbox with a surrogate estimator, use `add_surrogate`
         which automatically extract X, y matrices from available blackbox evaluations.
+
         :param X: dataframe containing hyperparameters values, columns should be the ones in configuration_space
-        and fidelity_space
+          and fidelity_space
         :param y: dataframe containing objectives values
         :param configuration_space:
         :param fidelity_space:
@@ -52,6 +54,8 @@ class BlackboxSurrogate(Blackbox):
         :param max_fit_samples: maximum number of samples to be fed to the surrogate estimator, if the more data points
         than this number are passed, then they are subsampled without replacement.
         :param name:
+        :param hps_to_exclude: sequence of the names of hyperparameters to exclude as the surrogate training features.
+          Useful if creating a more model-based surrogate.
         """
         super(BlackboxSurrogate, self).__init__(
             configuration_space=configuration_space,
@@ -64,11 +68,13 @@ class BlackboxSurrogate(Blackbox):
         self.max_fit_samples = max_fit_samples
         self.fit_surrogate(X=X, y=y, surrogate=surrogate, max_samples=self.max_fit_samples)
         self.name = name
-        self._fidelity_values = fidelity_values
+        self.fidelity_values = fidelity_values
+        self.hps_to_exclude = hps_to_exclude
+        self.fit_surrogate(surrogate)
 
-    @property
-    def fidelity_values(self) -> np.array:
-        return self._fidelity_values
+    # @property
+    # def fidelity_values(self) -> np.array:
+    #     return self._fidelity_values
 
     @staticmethod
     def make_model_pipeline(configuration_space, fidelity_space, model):
@@ -82,6 +88,9 @@ class BlackboxSurrogate(Blackbox):
             surrogate_hps.update(fidelity_space)
         else:
             surrogate_hps = configuration_space
+        # TODO adamg: might need to reenable this
+        # for k in hps_to_exclude:
+        #     surrogate_hps.pop(k, None)
 
         for hp_name, hp in surrogate_hps.items():
             if isinstance(hp, Categorical):
@@ -163,7 +172,8 @@ class BlackboxSurrogate(Blackbox):
 def add_surrogate(
         blackbox: Blackbox,
         surrogate=None,
-        configuration_space=None):
+        configuration_space=None,
+        hps_to_exclude=tuple()):
     """
     Fits a blackbox surrogates that can be evaluated anywhere, which can be useful
     for supporting interpolation/extrapolation.
@@ -180,6 +190,7 @@ def add_surrogate(
         The default is `blackbox.configuration_space`. But note that if `blackbox`
         is tabular, the domains in `blackbox.configuration_space` are typically
         categorical even for numerical parameters.
+    :param hps_to_exclude: sequence of the names of hyperparameters to exclude as the surrogate training features.
     :return: a blackbox where the output is obtained through the fitted surrogate
     """
     if surrogate is None:
@@ -194,4 +205,5 @@ def add_surrogate(
         fidelity_space=blackbox.fidelity_space,
         fidelity_values=blackbox.fidelity_values,
         surrogate=surrogate,
+        hps_to_exclude=hps_to_exclude,
     )

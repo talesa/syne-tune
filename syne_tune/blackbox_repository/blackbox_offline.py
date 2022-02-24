@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
+import numpy as np
 import pandas as pd
 
 from syne_tune.blackbox_repository.blackbox import Blackbox
@@ -14,6 +15,7 @@ class BlackboxOffline(Blackbox):
         df_evaluations: pd.DataFrame,
         configuration_space: Dict,
         fidelity_space: Optional[Dict] = None,
+        fidelity_values: Optional[np.array] = None,
         objectives_names: Optional[List[str]] = None,
         seed_col: Optional[str] = None,
     ):
@@ -38,7 +40,8 @@ class BlackboxOffline(Blackbox):
         super(BlackboxOffline, self).__init__(
             configuration_space=configuration_space,
             fidelity_space=fidelity_space,
-            objectives_names=objectives_names
+            fidelity_values=fidelity_values,
+            objectives_names=objectives_names,
         )
 
         hp_names = list(configuration_space.keys())
@@ -131,6 +134,7 @@ def serialize(bb_dict: Dict[str, BlackboxOffline], path: str, categorical_cols: 
     for bb in bb_dict.values():
         assert bb.configuration_space == bb_first.configuration_space
         assert bb.fidelity_space == bb_first.fidelity_space
+        assert bb.fidelity_values == bb_first.fidelity_values
         assert bb.objectives_names == bb_first.objectives_names
 
     path = Path(path)
@@ -139,7 +143,8 @@ def serialize(bb_dict: Dict[str, BlackboxOffline], path: str, categorical_cols: 
     serialize_configspace(
         path=path,
         configuration_space=bb_first.configuration_space,
-        fidelity_space=bb_first.fidelity_space
+        fidelity_space=bb_first.fidelity_space,
+        fidelity_values=bb_first.fidelity_values,
     )
 
     for name, bb in bb_dict.items():
