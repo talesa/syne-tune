@@ -28,7 +28,7 @@ class SimulatorCallback(StoreResultsCallback):
     Callback to be used in `Tuner.run` in order to support the
     :class:`SimulatorBackend`.
 
-    This is doing two things. First, `on_tuning_sleep` is advancing the
+    This is doing three things. First, `on_tuning_sleep` is advancing the
     `time_keeper` of the simulator back-end by `tuner_sleep_time` (also
     defined in the back-end). The real sleep time in `Tuner` must be 0.
 

@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Optional, Dict, Sequence
 import pandas as pd
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import Pipeline, FeatureUnion, make_pipeline
@@ -32,22 +32,26 @@ class BlackboxSurrogate(Blackbox):
             fidelity_values: Optional[np.array] = None,
             surrogate=KNeighborsRegressor(n_neighbors=1),
             name: Optional[str] = None,
+            hps_to_exclude: Optional[Sequence[str]] = tuple(),
     ):
         """
         Fits a blackbox surrogates that can be evaluated anywhere, which can be useful for supporting
         interpolation/extrapolation. To wrap an existing blackbox with a surrogate estimator, use `add_surrogate`
         which automatically extract X, y matrices from available blackbox evaluations.
+
         :param X: dataframe containing hyperparameters values, columns should be the ones in configuration_space
-        and fidelity_space
+          and fidelity_space
         :param y: dataframe containing objectives values
         :param configuration_space:
         :param fidelity_space:
         :param surrogate: the model that is fitted to predict objectives given any configuration.
-        Possible examples: KNeighborsRegressor(n_neighbors=1), MLPRegressor() or any estimator obeying Scikit-learn API.
-        The model is fit on top of pipeline that applies basic feature-processing to convert rows in X to vectors.
-        We use the configuration_space hyperparameters types to deduce the types of columns in X (for instance
-        CategoricalHyperparameter are one-hot encoded).
+          Possible examples: KNeighborsRegressor(n_neighbors=1), MLPRegressor() or any estimator obeying Scikit-learn API.
+          The model is fit on top of pipeline that applies basic feature-processing to convert rows in X to vectors.
+          We use the configuration_space hyperparameters types to deduce the types of columns in X (for instance
+          CategoricalHyperparameter are one-hot encoded).
         :param name:
+        :param hps_to_exclude: sequence of the names of hyperparameters to exclude as the surrogate training features.
+          Useful if creating a more model-based surrogate.
         """
         super(BlackboxSurrogate, self).__init__(
             configuration_space=configuration_space,
@@ -59,20 +63,21 @@ class BlackboxSurrogate(Blackbox):
         self.X = X
         self.y = y
         self.surrogate = surrogate
-        self.fit_surrogate(surrogate)
         self.name = name
-        self._fidelity_values = fidelity_values
+        self.fidelity_values = fidelity_values
+        self.hps_to_exclude = hps_to_exclude
+        self.fit_surrogate(surrogate)
 
-    @property
-    def fidelity_values(self) -> np.array:
-        return self._fidelity_values
+    # @property
+    # def fidelity_values(self) -> np.array:
+    #     return self._fidelity_values
 
     def fit_surrogate(self, surrogate=KNeighborsRegressor(n_neighbors=1)) -> Blackbox:
         """
         Fits a surrogate model to a blackbox.
         :param surrogate: fits the model and apply the model transformation when evaluating a
-        blackbox configuration. Possible example: KNeighborsRegressor(n_neighbors=1), MLPRegressor() or any estimator
-        obeying Scikit-learn API.
+          blackbox configuration. Possible example: KNeighborsRegressor(n_neighbors=1), MLPRegressor() or any estimator
+          obeying Scikit-learn API.
         """
         self.surrogate = surrogate
 
@@ -86,6 +91,8 @@ class BlackboxSurrogate(Blackbox):
             surrogate_hps.update(self.fidelity_space)
         else:
             surrogate_hps = self.configuration_space
+        for k in self.hps_to_exclude:
+            surrogate_hps.pop(k, None)
 
         for hp_name, hp in surrogate_hps.items():
             if isinstance(hp, sp.Categorical):
@@ -145,17 +152,19 @@ class BlackboxSurrogate(Blackbox):
             return objectives_values
 
 
-def add_surrogate(blackbox: Blackbox, surrogate=KNeighborsRegressor(n_neighbors=1)):
+def add_surrogate(blackbox: Blackbox, surrogate=KNeighborsRegressor(n_neighbors=1), hps_to_exclude=tuple()):
     """
     Fits a blackbox surrogates that can be evaluated anywhere, which can be useful for supporting
     interpolation/extrapolation.
-    :param blackbox: the blackbox must implement `hyperparame`ter_objectives_values`
-    so that input/output are passed to estimate the model, see `BlackboxOffline` or `BlackboxTabular
+    :param blackbox: the blackbox must implement `hyperparameter_objectives_values`
+    so that input/output are passed to estimate the model, see `BlackboxOffline` or `BlackboxTabular`
     :param surrogate: the model that is fitted to predict objectives given any configuration.
     Possible examples: KNeighborsRegressor(n_neighbors=1), MLPRegressor() or any estimator obeying Scikit-learn API.
     The model is fit on top of pipeline that applies basic feature-processing to convert rows in X to vectors.
     We use the configuration_space hyperparameters types to deduce the types of columns in X (for instance
     CategoricalHyperparameter are one-hot encoded).
+    :param hps_to_exclude: sequence of the names of hyperparameters to exclude as the surrogate training features.
+    Useful if creating a more model-based surrogate.
     :return: a blackbox where the output is obtained through the fitted surrogate
     """
     X, y = blackbox.hyperparameter_objectives_values()
@@ -166,4 +175,5 @@ def add_surrogate(blackbox: Blackbox, surrogate=KNeighborsRegressor(n_neighbors=
         fidelity_space=blackbox.fidelity_space,
         fidelity_values=blackbox.fidelity_values,
         surrogate=surrogate,
+        hps_to_exclude=hps_to_exclude,
     )

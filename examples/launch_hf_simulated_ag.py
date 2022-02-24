@@ -5,8 +5,10 @@ import syne_tune.search_space as sp
 
 from blackbox_repository import load, add_surrogate
 from blackbox_repository.blackbox_tabular import BlackboxTabular
-from blackbox_repository.conversion_scripts.scripts.nasbench201_cloud import generate_nas201_cloud
+from blackbox_repository.conversion_scripts.scripts.hf_cloud_ag import generate_hf_cloud
 from blackbox_repository.tabulated_benchmark import BlackboxRepositoryBackend, UserBlackboxBackend
+
+from sklearn.neighbors import KNeighborsRegressor
 
 from syne_tune.backend.simulator_backend.simulator_callback import SimulatorCallback
 from syne_tune.optimizer.baselines import ASHA
@@ -26,6 +28,8 @@ def simulate_benchmark(backend, metric):
     )
 
     stop_criterion = StoppingCriterion(max_wallclock_time=7200)
+
+    n_workers = 1
 
     # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
     tuner = Tuner(
@@ -47,22 +51,25 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
 
     # loading data and querying stuff
-    bb_dict = generate_nas201_cloud()
-    blackbox = bb_dict["cifar10"]
-    config = {f'hp_x{i}': 'avg_pool_3x3' for i in range(6)}
-    for instance_type in ['ml.c5.2xlarge', 'ml.g4dn.8xlarge']:
+    bb_dict = generate_hf_cloud()
+    blackbox = bb_dict["imdb"]
+
+    config = {
+        'per_device_train_batch_size': 10,
+        'weight_decay': 0.0001,
+        'learning_rate': 0.000003,
+    }
+    for instance_type in ['ml.g5.xlarge', 'ml.g4dn.8xlarge']:
         config['instance_type'] = instance_type
-        print(f"performance for {instance_type}: {blackbox(configuration=config, fidelity=200, seed=0)}")
+        print(f"performance for {instance_type}: {blackbox(configuration=config, fidelity=199, seed=0)}")
 
     # simulating HPO
-    n_workers = 4
-    metric = "metric_valid_error"
-    time_this_resource_attr = 'metric_runtime'
-    elapsed_time_attr = 'metric_elapsed_time'
+    n_workers = 1
+    metric = "metric_training_loss"
+    elapsed_time_attr = 'metric_train_runtime'
 
     backend = UserBlackboxBackend(
         blackbox=blackbox,
-        elapsed_time_attr="runtime",
-        time_this_resource_attr=time_this_resource_attr,
+        elapsed_time_attr=elapsed_time_attr,
     )
     simulate_benchmark(backend=backend, metric=metric)

@@ -14,7 +14,10 @@
 Example for how to fine-tune a DistilBERT model on the IMDB sentiment classification task using the Hugging Face SageMaker Framework.
 """
 import logging
+import math
 from pathlib import Path
+
+import numpy as np
 
 from sagemaker.huggingface import HuggingFace
 
@@ -26,7 +29,7 @@ from syne_tune.optimizer.baselines import RandomSearch
 from syne_tune.remote.remote_launcher import RemoteLauncher
 from syne_tune.tuner import Tuner
 from syne_tune.stopping_criterion import StoppingCriterion
-from syne_tune.search_space import loguniform, choice, randint
+import syne_tune.search_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import select_instance_type
 
 
@@ -49,83 +52,101 @@ if __name__ == '__main__':
 
     # instance_types = select_instance_type(min_gpu=1, max_cost_per_hour=10.0)
     instance_types = [
-        'ml.p3.2xlarge',
-        'ml.p2.xlarge',
-        'ml.p2.8xlarge',
-        'ml.g4dn.xlarge',
-        'ml.g4dn.2xlarge',
-        'ml.g4dn.4xlarge',
-        'ml.g4dn.8xlarge',
-        'ml.g4dn.12xlarge',
-        'ml.g5.xlarge',
-        'ml.g5.2xlarge',
-        'ml.g5.4xlarge',
-        'ml.g5.8xlarge',
+        # 'ml.p3.2xlarge',
+        # 'ml.p2.xlarge',
+        # 'ml.p2.8xlarge',
+        # 'ml.g4dn.xlarge',
+        # 'ml.g4dn.2xlarge',
+        # 'ml.g4dn.4xlarge',
+        # 'ml.g4dn.8xlarge',
+        # 'ml.g4dn.12xlarge',
+        # 'ml.g5.xlarge',
+        # 'ml.g5.2xlarge',
+        # 'ml.g5.4xlarge',
+        # 'ml.g5.8xlarge',
         'ml.g5.12xlarge',
-        'ml.g5.24xlarge',
+        # 'ml.g5.24xlarge',
     ]
 
-    #       GPU  RAM
-    # g4dn T4   16GB
+    #       GPU  RAM max_bs_imdb
+    # g4dn T4   16GB          32
     # g5   A10G 24GB
     # p2   K80  24GB
     # p3   V100 32GB
     # p4d  A100 40GB
 
-    # tuner_job_name = 'test-g4dn-bs-26'
-    # tuner_job_name = 'speed-bs-it'
-    # n_workers = 5
-    # config_space = dict(
-    #     per_device_train_batch_size=choice([4, 8, 12, 16, 20, 24, 28, 30, 32]),  # TODO select me
-    #     # per_device_train_batch_size=26,
-    #     n_train_data=384*16,
-    #     epochs=1,
-    #     per_device_eval_batch_size=32,
-    #     n_eval_data=32,
-    #     log_interval=0,
-    #     eval_interval=0,
-    #     learning_rate=1e-6,
-    #     weight_decay=1e-6,
-    #     dataloader_num_workers=0,
-    #     st_instance_type=choice(instance_types),  # TODO select me
-    #     # st_instance_type='ml.g4dn.xlarge',
-    #     max_resource_level=default_params['max_resource_level'])
-    # single_job_max_run = 15*60  # 15min
-    # # single_job_max_run = 60 * 60  # 15min
-    # stop_criterion = StoppingCriterion(
-    #     max_wallclock_time=10 * 60 * 60,  # 10h
-    #     max_num_trials_completed=1000,)
-        # max_num_trials_completed=1,)
+    # instance_type_config_space = dict(
+    #     num_gpus=sp.logfinrange(1, 8, 3),  # [1, 4, 8]
+    #     num_vcpus=sp.logfinrange(1, 8, 4),  # [1, 2, 4, 8]
+    #     # num_vcpus=sp.logfinrange([1, 2, 4, 8, ...]),  # [1, 4, 8]
+    # )
+    # instance_type_config_space['num_gpus'].sample()
 
-    tuner_job_name = 'loss-lr-wd-bs-2'
-    n_workers = 5
+    # tuner_job_name = 'test-g4dn-bs-26'
+    tuner_job_name = 'speed-bs-it-nw-new'
+    n_workers = 40
+
+    per_device_train_batch_size_list = [4, 8, 16, 24, 32, 40, 48]
+    dataloader_num_workers_list = [0, 1]
+    seeds = [0, 1, 2]
+
+    per_device_train_batch_size_list = [52]
+    dataloader_num_workers_list = [0]
+    seeds = [0]
+
     config_space = dict(
-        # per_device_train_batch_size=randint(4, 16),
-        per_device_train_batch_size=choice([2, 4, 8, 12, 16]),
+        per_device_train_batch_size=sp.choice(per_device_train_batch_size_list),  # TODO select me
+        # per_device_train_batch_size=26,
         n_train_data=25000,
         epochs=3,
-        per_device_eval_batch_size=32,
-        n_eval_data=8192,
+        per_device_eval_batch_size=1,
+        n_eval_data=1,
         log_interval=100,
         eval_interval=0,
-        learning_rate=loguniform(1e-7, 1e-4),
-        weight_decay=loguniform(1e-6, 1e-2),
-        dataloader_num_workers=1,
-        st_instance_type='ml.g4dn.xlarge',
-        # dataset_path=default_params['dataset_path'],
-        # keep_in_memory=0,
+        learning_rate=1e-6,
+        weight_decay=1e-6,
+        dataloader_num_workers=sp.choice(dataloader_num_workers_list),
+        st_instance_type=sp.choice(instance_types),  # TODO select me
+        # st_instance_type='ml.g4dn.xlarge',
+        seed=sp.choice(seeds),  # TODO select me
         max_resource_level=default_params['max_resource_level'])
-    single_job_max_run = 90*60  # 90min
+    single_job_max_run = 10*60  # 10min
     stop_criterion = StoppingCriterion(
-        max_wallclock_time=10 * 60 * 60,  # 10h
-        max_num_trials_completed=100)
+        # max_wallclock_time=10 * 60 * 60,  # 10h
+        max_num_trials_finished=int(np.prod(tuple(map(len, (per_device_train_batch_size_list, dataloader_num_workers_list, instance_types, seeds))))),
+        # max_num_trials_completed=1000,
+        # max_num_trials_completed=1,
+    )
+
+    # tuner_job_name = 'loss-lr-wd-bs-2'
+    # n_workers = 5
+    # config_space = dict(
+    #     # per_device_train_batch_size=randint(4, 16),
+    #     per_device_train_batch_size=sp.choice([2, 4, 8, 12, 16]),
+    #     n_train_data=25000,
+    #     epochs=3,
+    #     per_device_eval_batch_size=32,
+    #     n_eval_data=8192,
+    #     log_interval=100,
+    #     eval_interval=0,
+    #     learning_rate=loguniform(1e-7, 1e-4),
+    #     weight_decay=loguniform(1e-6, 1e-2),
+    #     dataloader_num_workers=1,
+    #     st_instance_type='ml.g4dn.xlarge',
+    #     # dataset_path=default_params['dataset_path'],
+    #     # keep_in_memory=0,
+    #     max_resource_level=default_params['max_resource_level'])
+    # single_job_max_run = 90*60  # 90min
+    # stop_criterion = StoppingCriterion(
+    #     max_wallclock_time=10 * 60 * 60,  # 10h
+    #     max_num_trials_completed=100)
 
     # tuner_job_name = 'dataloader-num-workers'
     # points_to_evaluate = [dict(
     #     learning_rate=1e-6,
     #     weight_decay=1e-6,
     #     dataloader_num_workers=dataloader_num_workers,
-    #     # st_instance_type=choice(instance_types),
+    #     # st_instance_type=sp.choice(instance_types),
     #     epochs=epochs,
     #     # dataset_path=default_params['dataset_path'],
     #     keep_in_memory=False,
@@ -138,7 +159,7 @@ if __name__ == '__main__':
     #     learning_rate=1e-6,
     #     weight_decay=1e-6,
     #     dataloader_num_workers=0,
-    #     # st_instance_type=choice(instance_types),
+    #     # st_instance_type=sp.choice(instance_types),
     #     epochs=1,
     #     # dataset_path=default_params['dataset_path'],
     #     keep_in_memory=True,
@@ -202,7 +223,7 @@ if __name__ == '__main__':
         tuner_name=tuner_job_name,
         max_failures=10000000,
     )
-    # tuner.run()
+    tuner.run()
 
     remote_launcher = RemoteLauncher(
         tuner=tuner,

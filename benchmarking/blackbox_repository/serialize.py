@@ -1,12 +1,14 @@
 from pathlib import Path
 from typing import Optional, Dict
 import json
+import numpy as np
 import syne_tune.search_space as sp
 
 def serialize_configspace(
     path: str,
     configuration_space: Dict,
-    fidelity_space: Optional[Dict] = None
+    fidelity_space: Optional[Dict] = None,
+    fidelity_values: Optional[np.array] = None,
 ):
     path = Path(path)
     with open(path / 'configspace.json', 'w') as f:
