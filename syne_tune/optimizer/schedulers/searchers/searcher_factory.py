@@ -24,6 +24,8 @@ from syne_tune.optimizer.schedulers.searchers.cost_aware_gp_multifidelity_search
     import CostAwareGPMultiFidelitySearcher
 from syne_tune.optimizer.schedulers.searchers.searcher import \
     RandomSearcher
+from syne_tune.optimizer.schedulers.searchers.multiobjective_scalarization_gp_fifo_searcher \
+    import MOScalarGPFIFOSearcher
 
 __all__ = ['searcher_factory']
 
@@ -63,6 +65,8 @@ def searcher_factory(searcher_name, **kwargs):
     elif searcher_name == 'bayesopt':
         if scheduler == 'fifo':
             searcher_cls = GPFIFOSearcher
+        elif scheduler == 'mofifo':
+            searcher_cls = MOScalarGPFIFOSearcher
         else:
             supported_schedulers = _OUR_MULTIFIDELITY_SCHEDULERS
             if model == 'gp_multitask' and \
