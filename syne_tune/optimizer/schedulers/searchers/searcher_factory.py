@@ -24,7 +24,7 @@ from syne_tune.optimizer.schedulers.searchers.cost_aware_gp_multifidelity_search
     import CostAwareGPMultiFidelitySearcher
 from syne_tune.optimizer.schedulers.searchers.searcher import \
     RandomSearcher
-from syne_tune.optimizer.schedulers.searchers.multiobjective_scalarization_gp_fifo_searcher \
+from syne_tune.optimizer.schedulers.searchers.multiobjective_scalarization_fifo_searcher \
     import MOScalarGPFIFOSearcher
 
 __all__ = ['searcher_factory']

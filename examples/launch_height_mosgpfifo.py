@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from syne_tune.backend import LocalBackend
-from syne_tune.optimizer.schedulers.multiobjective.multiobjective_scalarization_gp_fifo_scheduler import MOScalarFIFOScheduler
+from syne_tune.optimizer.schedulers.multiobjective.multiobjective_scalarization_fifo_scheduler import MOScalarFIFOScheduler
 from syne_tune import Tuner
 from syne_tune.search_space import uniform
 from syne_tune import StoppingCriterion
