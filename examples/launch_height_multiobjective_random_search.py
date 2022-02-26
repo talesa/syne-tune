@@ -19,8 +19,8 @@ from pathlib import Path
 import numpy as np
 
 from syne_tune.backend import LocalBackend
-from syne_tune.optimizer.schedulers.multiobjective.multiobjective_scalarization_fifo_scheduler import MOScalarFIFOScheduler
 from syne_tune import Tuner
+from syne_tune.optimizer.schedulers.fifo import FIFOScheduler
 from syne_tune.search_space import uniform
 from syne_tune import StoppingCriterion
 
@@ -35,18 +35,17 @@ if __name__ == '__main__':
     config_space = {
         "steps": max_steps,
         "theta": uniform(0, np.pi / 2),
-        "sleep_time": 0.01,
+        "sleep_time": 0.001,
     }
     entry_point = Path(__file__).parent / "training_scripts" / "mo_artificial" / "mo_artificial.py"
     mode = "min"
 
     np.random.seed(0)
-    scheduler = MOScalarFIFOScheduler(
-        searcher='bayesopt',
+    scheduler = FIFOScheduler(
+        searcher='random',
         max_t=max_steps,
-        # time_attr="step",
         mode=mode,
-        metrics=["y1", "y2"],
+        metric="y1",  # When running a random search in a multiobjective setting it doesn't matter
         config_space=config_space,
     )
     trial_backend = LocalBackend(entry_point=str(entry_point))

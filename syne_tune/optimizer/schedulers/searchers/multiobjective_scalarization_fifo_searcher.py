@@ -48,26 +48,6 @@ logger = logging.getLogger(__name__)
 __all__ = ['MOScalarGPFIFOSearcher']
 
 
-# TODO this implementation scalarizes the objective before it is presented to the GP, and the GP is only learning
-#  about the scalarized which is clearly wrong
-class WrongMOScalarGPFIFOSearcher(GPFIFOSearcher):
-    """Multiobjective Scalarization GPFIFOSearcher"""
-    def __init__(self, metrics: List[str], **kwargs):
-        super().__init__(metric='scalarized_objective', **kwargs)
-        self._metrics = metrics
-        # TODO add a way to initialize weigths
-        self._weights = [1. for _ in range(len(self._metrics))]
-
-    # TODO the logic below pretty much duplicated between MOScalarGPFIFOSearcher and MOScalarGPFIFOScheduler
-    def _scalarize_objectives(self, result: Dict):
-        return sum(weight * objective_value for weight, objective_value in
-                   zip(self._weights, [result[k] for k in self._metrics]))
-
-    def _update(self, trial_id: str, config: Dict, result: Dict):
-        result[self._metric] = self._scalarize_objectives(result)
-        super()._update(trial_id, config, result)
-
-
 # TODO for now just copied CostAwareGPFIFOSearcher
 class MOScalarGPFIFOSearcher(MultiModelGPFIFOSearcher):
     """

@@ -32,9 +32,8 @@ if __name__ == '__main__':
         "sleep_time": 0.01,
     }
 
-    trial_backend = LocalBackend(
-        entry_point=str(Path(__file__).parent.parent / "examples" / "training_scripts" / "mo_artificial" /
-                        "mo_artificial.py"))
+    entry_point = Path(__file__).parent.parent / "examples" / "training_scripts" / "mo_artificial" / "mo_artificial.py"
+    trial_backend = LocalBackend(entry_point=str(entry_point))
 
     # Multi objective scalarization BayesOpt
     searcher = 'mo_scalar_bayesopt'
