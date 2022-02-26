@@ -11,7 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 """
-Example showing how to tune multiple objectives at once of an artificial function.
+Example showing how to run a random search to tune multiple objectives at once of an artificial function.
 """
 import logging
 from pathlib import Path
@@ -40,12 +40,14 @@ if __name__ == '__main__':
     entry_point = Path(__file__).parent / "training_scripts" / "mo_artificial" / "mo_artificial.py"
     mode = "min"
 
-    np.random.seed(0)
+    # We use a single-objective FIFOScheduler to run a random search on a multiobjective problem
     scheduler = FIFOScheduler(
         searcher='random',
         max_t=max_steps,
         mode=mode,
-        metric="y1",  # When running a random search in a multiobjective setting it doesn't matter
+        # When running a random search (searcher='random') the setting of parameter 'metric' doesn't change the
+        # behaviour of the scheduler so we just set it to a value of any returned metric.
+        metric="y1",
         config_space=config_space,
     )
     trial_backend = LocalBackend(entry_point=str(entry_point))
