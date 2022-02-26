@@ -65,8 +65,6 @@ def searcher_factory(searcher_name, **kwargs):
     elif searcher_name == 'bayesopt':
         if scheduler == 'fifo':
             searcher_cls = GPFIFOSearcher
-        elif scheduler == 'mofifo':
-            searcher_cls = MOScalarGPFIFOSearcher
         else:
             supported_schedulers = _OUR_MULTIFIDELITY_SCHEDULERS
             if model == 'gp_multitask' and \
@@ -87,6 +85,8 @@ def searcher_factory(searcher_name, **kwargs):
         else:
             supported_schedulers = _OUR_MULTIFIDELITY_SCHEDULERS
             searcher_cls = CostAwareGPMultiFidelitySearcher
+    elif searcher_name == 'bayesopt_mo_scalar':
+        searcher_cls = MOScalarGPFIFOSearcher
     else:
         raise AssertionError(f"searcher '{searcher_name}' is not supported")
 
