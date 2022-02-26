@@ -46,7 +46,7 @@ if __name__ == '__main__':
         max_t=max_steps,
         mode=mode,
         # When running a random search (searcher='random') the setting of parameter 'metric' doesn't change the
-        # behaviour of the scheduler so we just set it to a value of any returned metric.
+        # behaviour of the scheduler, so we just set it to a value of any returned metric.
         metric="y1",
         config_space=config_space,
     )

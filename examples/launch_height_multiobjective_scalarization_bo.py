@@ -36,6 +36,7 @@ if __name__ == '__main__':
     trial_backend = LocalBackend(entry_point=str(entry_point))
 
     # Multi objective scalarization BayesOpt
+    # TODO This doesn't work at the moment, it's just a "proposal/draft" of the API v1 for this feature.
     searcher = 'mo_scalar_bayesopt'
     # When using mo_scalar_bayesopt searcher, for now we need to set metric to 'scalarization', it's a dummy value that
     #  is ignored in pracitce.
@@ -51,7 +52,7 @@ if __name__ == '__main__':
     myscheduler = FIFOScheduler(
         config_space,
         searcher=searcher,
-        metric=metric,  # TODO this is not a good design choice but good enough for now
+        metric=metric,
         search_options=search_options,
         mode='min',
     )
