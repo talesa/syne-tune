@@ -244,6 +244,93 @@ class EIpuAcquisitionFunction(MeanStdAcquisitionFunction):
         return pred_cost
 
 
+class MultiobjectiveScalarizedEIAcquisitionFunction(MeanStdAcquisitionFunction):
+    """
+    Multiobjective scalarization Expected-improvement acquisition function.
+    """
+    # TODO need help with deciding how to proceed on adjusting and implementing
+    #   GP with multiple outputs and the scalarization-EI-acquisition-function.
+    def __init__(
+            self,
+            model: SurrogateOutputModel,
+            metrics: List[str] = None,
+            scalarization_method: str = 'random-weights',
+            jitter: float = 0.01):
+        super().__init__(model, 'scalarized_objective')
+        # assert 0 < exponent_cost <= 1, \
+        #     f"exponent_cost = {exponent_cost} must lie in (0, 1]"
+        self.jitter = jitter
+        self.active_metric, self.cost_metric = _extract_active_and_secondary_metric(
+            self.model_output_names, active_metric)
+
+    def _head_needs_current_best(self) -> bool:
+        return True
+
+    def _output_to_keys_predict(self) -> Dict[str, Set[str]]:
+        """
+        The cost model may be deterministic, as the acquisition function
+        only needs the mean.
+        """
+        return {
+            self.model_output_names[0]: {'mean', 'std'},
+            self.model_output_names[1]: {'mean'}}
+
+    def _compute_head(
+            self, output_to_predictions: SamplePredictionsPerOutput,
+            current_best: Optional[np.ndarray]) -> np.ndarray:
+        """
+        Returns minus the cost-aware expected improvement.
+        """
+        assert current_best is not None
+        means, stds = self._extract_mean_and_std(output_to_predictions)
+        pred_costs = self._extract_positive_cost(output_to_predictions)
+
+        # phi, Phi is PDF and CDF of Gaussian
+        phi, Phi, u = get_quantiles(self.jitter, current_best, means, stds)
+        f_acqu = stds * (u * Phi + phi) * np.power(pred_costs,
+                                                   -self.exponent_cost)
+        return -np.mean(f_acqu, axis=1)
+
+    def _compute_head_and_gradient(
+            self, output_to_predictions: SamplePredictionsPerOutput,
+            current_best: Optional[np.ndarray]) -> HeadWithGradient:
+        """
+        Returns minus cost-aware expected improvement and, for each output model, the gradients
+        with respect to the mean and standard deviation of that model.
+        """
+        assert current_best is not None
+        mean, std = self._extract_mean_and_std(output_to_predictions)
+        pred_cost = self._extract_positive_cost(output_to_predictions)
+        nf_active = mean.size
+        nf_cost = pred_cost.size
+
+        # phi, Phi is PDF and CDF of Gaussian
+        phi, Phi, u = get_quantiles(self.jitter, current_best, mean, std)
+        inv_cost_power = np.power(pred_cost, -self.exponent_cost)
+        f_acqu = std * (u * Phi + phi) * inv_cost_power
+
+        dh_dmean_active = _postprocess_gradient(
+            Phi * inv_cost_power, nf=nf_active)
+        dh_dstd_active = _postprocess_gradient(-phi * inv_cost_power, nf=1)
+        # Flip the sign twice: once because of the derivative of 1 / x, and
+        # once because the head is actually - f_ei
+        dh_dmean_cost = _postprocess_gradient(
+            self.exponent_cost * f_acqu / pred_cost, nf=nf_cost)
+
+        gradient = {
+            self.active_metric: dict(mean=dh_dmean_active, std=dh_dstd_active),
+            self.cost_metric: dict(mean=dh_dmean_cost)}
+        return HeadWithGradient(hval=-np.mean(f_acqu), gradient=gradient)
+
+    def _extract_positive_cost(self, output_to_predictions):
+        pred_cost = output_to_predictions[self.cost_metric]['mean']
+        if np.any(pred_cost) < 0.0:
+            logger.warning(f'The model for {self.cost_metric} predicted some negative cost. '
+                           f'Capping the minimum cost at {MIN_COST}.')
+        pred_cost = np.maximum(pred_cost, MIN_COST)  # ensure that the predicted cost/run-time is positive
+        return pred_cost
+
+
 class ConstraintCurrentBestProvider(CurrentBestProvider):
     """
     Here, `current_best` depends on two models, for active and

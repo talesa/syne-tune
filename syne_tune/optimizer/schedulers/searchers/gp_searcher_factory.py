@@ -46,7 +46,8 @@ from syne_tune.optimizer.schedulers.searchers.bayesopt.models.gpiss_model \
 from syne_tune.optimizer.schedulers.searchers.bayesopt.models.cost_fifo_model \
     import CostSurrogateModelFactory
 from syne_tune.optimizer.schedulers.searchers.bayesopt.models.meanstd_acqfunc_impl \
-    import EIAcquisitionFunction, CEIAcquisitionFunction, EIpuAcquisitionFunction
+    import EIAcquisitionFunction, CEIAcquisitionFunction, EIpuAcquisitionFunction, \
+    MultiobjectiveScalarizedEIAcquisitionFunction
 from syne_tune.optimizer.schedulers.searchers.bayesopt.tuning_algorithms.defaults \
     import DEFAULT_NUM_INITIAL_CANDIDATES, DEFAULT_NUM_INITIAL_RANDOM_EVALUATIONS
 from syne_tune.optimizer.schedulers.searchers.bayesopt.datatypes.common \
@@ -70,11 +71,13 @@ __all__ = ['gp_fifo_searcher_factory',
            'cost_aware_coarse_gp_fifo_searcher_factory',
            'cost_aware_fine_gp_fifo_searcher_factory',
            'cost_aware_gp_multifidelity_searcher_factory',
+           'multiobjective_scalarized_gp_fifo_searcher_factory',
            'gp_fifo_searcher_defaults',
            'gp_multifidelity_searcher_defaults',
            'constrained_gp_fifo_searcher_defaults',
            'cost_aware_gp_fifo_searcher_defaults',
-           'cost_aware_gp_multifidelity_searcher_defaults']
+           'cost_aware_gp_multifidelity_searcher_defaults',
+           'multiobjective_scalarized_gp_fifo_searcher_defaults']
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +432,53 @@ def cost_aware_coarse_gp_fifo_searcher_factory(**kwargs) -> Dict:
                 acquisition_class=acquisition_class)
 
 
+def multiobjective_scalarized_gp_fifo_searcher_factory(**kwargs) -> Dict:
+    """
+    Returns kwargs for `MOScalarGPFIFOSearcher._create_internal`, based on
+    kwargs equal to search_options passed to and extended by scheduler (see
+    :class:`FIFOScheduler`).
+
+    :param kwargs: search_options coming from scheduler
+    :return: kwargs for MOScalarGPFIFOSearcher._create_internal
+
+    """
+    assert kwargs['scheduler'] == 'fifo', \
+        "This factory needs scheduler = 'fifo' (instead of '{}')".format(
+            kwargs['scheduler'])
+    # Common objects
+    result = _create_common_objects(**kwargs)
+    model_factory = result.pop('model_factory')
+    skip_optimization = result.pop('skip_optimization')
+    # We need k model factories, k = len(metrics).
+    random_seed, _kwargs = extract_random_seed(kwargs)
+    metrics = kwargs.get('metrics')
+    scalarization_method = kwargs.get('scalarization_method')
+    model_factories = []
+    for metric in metrics:
+        model_factory = _create_gp_standard_model(
+            hp_ranges=result['hp_ranges'],
+            active_metric=metric,
+            random_seed=random_seed,
+            is_hyperband=False,
+            **_kwargs)['model_factory']
+        model_factories.append(model_factory)
+        # Sharing debug_log attribute across models
+        model_factory._debug_log = model_factories[0]._debug_log
+    acquisition_class = (
+        MultiobjectiveScalarizedEIAcquisitionFunction, dict(metrics=metrics, scalarization_method=scalarization_method))
+
+    # The same skip_optimization strategy applies to all models
+    output_model_factory = {INTERNAL_METRIC_NAME + str(i): model_factory
+                            for i, model_factory in enumerate(model_factories)}
+    output_skip_optimization = {INTERNAL_METRIC_NAME + str(i): skip_optimization
+                            for i, model_factory in enumerate(model_factories)}
+
+    return dict(result,
+                output_model_factory=output_model_factory,
+                output_skip_optimization=output_skip_optimization,
+                acquisition_class=acquisition_class)
+
+
 def cost_aware_fine_gp_fifo_searcher_factory(**kwargs) -> Dict:
     """
     Returns kwargs for `CostAwareGPFIFOSearcher._create_internal`, based on
@@ -568,6 +618,7 @@ def _common_defaults(is_hyperband: bool, is_multi_output: bool) -> (Set[str], di
         default_options['use_new_code'] = True
     if is_multi_output:
         default_options['initial_scoring'] = 'acq_func'
+        # Is 'exponent_cost' needed for every multi-output model or is it cost-aware implementation specific?
         default_options['exponent_cost'] = 1.0
 
     constraints = {
@@ -666,3 +717,15 @@ def cost_aware_gp_multifidelity_searcher_defaults() -> (Set[str], dict, dict):
 
     """
     return _common_defaults(is_hyperband=True, is_multi_output=True)
+
+
+def multiobjective_scalarized_gp_fifo_searcher_defaults() -> (Set[str], dict, dict):
+    """
+    Returns mandatory, default_options, config_space for
+    check_and_merge_defaults to be applied to search_options for
+    :class:`MOScalarGPFIFOSearcher`.
+
+    :return: (mandatory, default_options, config_space)
+
+    """
+    return _common_defaults(is_hyperband=False, is_multi_output=True)
