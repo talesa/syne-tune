@@ -36,16 +36,18 @@ if __name__ == '__main__':
     trial_backend = LocalBackend(entry_point=str(entry_point))
 
     # Multi objective scalarization BayesOpt
-    # TODO This doesn't work at the moment, it's just a "proposal/draft" of the API v1 for this feature.
+    # TODO This doesn't work at the moment, it's just a "proposal/draft" of the API v0.1 for this feature.
     searcher = 'bayesopt_mo_scalar'
-    # When using mo_scalar_bayesopt searcher, for now we need to set metric to 'scalarization', it's a dummy value that
-    #  is ignored in pracitce.
-    # TODO this is not a good design choice but good enough for now.
-    metric = 'scalarization'
+    # When using FIFOScheduler (rather than ASHA/Hyperband or similar more advanced scheduler) with a bayesopt_mo_scalar
+    # searcher, for now we need to set 'metric' to any of the metrics recorded by the training script.
+    # TODO this is not a great design choice but good enough for now.
+    metric = 'y1'
     search_options = {
         'num_init_random': n_workers,
         # Since FIFOScheduler takes only one metric, we provide the names of multiple metrics in search_options.
         'metrics': ['y1', 'y2'],
+        # There are multiple ways to perform scalarization: random-weights, parego, golovin.
+        'scalarization_method': 'random-weights',
     }
     stop_criterion = StoppingCriterion(max_wallclock_time=30)
 

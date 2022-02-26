@@ -18,9 +18,8 @@ from syne_tune.optimizer.schedulers.searchers.cost_aware_gp_fifo_searcher import
 from syne_tune.optimizer.schedulers.searchers.gp_fifo_searcher import \
     GPFIFOSearcher
 from syne_tune.optimizer.schedulers.searchers.gp_searcher_factory import \
-    cost_aware_gp_fifo_searcher_defaults, \
-    cost_aware_coarse_gp_fifo_searcher_factory, \
-    cost_aware_fine_gp_fifo_searcher_factory
+    multiobjective_scalarized_gp_fifo_searcher_defaults, \
+    multiobjective_scalarized_gp_fifo_searcher_factory
 from syne_tune.optimizer.schedulers.searchers.gp_searcher_utils import \
     decode_state
 from syne_tune.optimizer.schedulers.searchers.utils.default_arguments \
@@ -48,41 +47,24 @@ logger = logging.getLogger(__name__)
 __all__ = ['MOScalarGPFIFOSearcher']
 
 
-# TODO for now just copied CostAwareGPFIFOSearcher
+# TODO for now mostly just copied from CostAwareGPFIFOSearcher
 class MOScalarGPFIFOSearcher(MultiModelGPFIFOSearcher):
     """
-    Gaussian process-based cost-aware hyperparameter optimization (to be used
-    with a FIFO scheduler). The searcher requires a cost metric, which is
-    given by `cost_attr`.
-
-    Implements two different variants. If `resource_attr` is given, cost values
-    are read from each report and cost is modeled as c(x, r), the cost model
-    being given by `kwargs['cost_model']`.
-    If `resource_attr` is not given, cost values are read only at the end (just
-    like the primary metric) and cost is modeled as c(x), using a default GP
-    surrogate model.
-
+    Gaussian process-based scalarization-based multiobjective hyperparameter
+    optimization to be used with a FIFO scheduler.
     """
     def __init__(self, configspace, metric, **kwargs):
-        assert kwargs.get('cost_attr') is not None, \
-            "This searcher needs a cost attribute. Please specify its " +\
-            "name in search_options['cost_attr']"
+        assert kwargs.get('metrics') is not None, \
+            "This searcher needs the parameter 'metrics'."
+        assert kwargs.get('scalarization_method') is not None, \
+            "This searcher needs the parameter 'scalarization_method'."
         super().__init__(configspace, metric, **kwargs)
 
     def _create_kwargs_int(self, kwargs):
         _kwargs = check_and_merge_defaults(
-            kwargs, *cost_aware_gp_fifo_searcher_defaults(),
+            kwargs, *multiobjective_scalarized_gp_fifo_searcher_defaults(),
             dict_name='search_options')
-        # If `resource_attr` is specified, we do fine-grained, otherwise
-        # coarse-grained
-        if kwargs.get('resource_attr') is not None:
-            logger.info("Fine-grained: Modelling cost values c(x, r) " +\
-                        "obtained at every resource level r")
-            kwargs_int = cost_aware_fine_gp_fifo_searcher_factory(**_kwargs)
-        else:
-            logger.info("Coarse-grained: Modelling cost values c(x) " +\
-                        "obtained together with metric values")
-            kwargs_int = cost_aware_coarse_gp_fifo_searcher_factory(**_kwargs)
+        kwargs_int = multiobjective_scalarized_gp_fifo_searcher_factory(**_kwargs)
         self._copy_kwargs_to_kwargs_int(kwargs_int, kwargs)
         return kwargs_int
 

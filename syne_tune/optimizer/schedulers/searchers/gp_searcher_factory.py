@@ -46,7 +46,8 @@ from syne_tune.optimizer.schedulers.searchers.bayesopt.models.gpiss_model \
 from syne_tune.optimizer.schedulers.searchers.bayesopt.models.cost_fifo_model \
     import CostSurrogateModelFactory
 from syne_tune.optimizer.schedulers.searchers.bayesopt.models.meanstd_acqfunc_impl \
-    import EIAcquisitionFunction, CEIAcquisitionFunction, EIpuAcquisitionFunction
+    import EIAcquisitionFunction, CEIAcquisitionFunction, EIpuAcquisitionFunction, \
+    MultiobjectiveScalarizedEIAcquisitionFunction
 from syne_tune.optimizer.schedulers.searchers.bayesopt.tuning_algorithms.defaults \
     import DEFAULT_NUM_INITIAL_CANDIDATES, DEFAULT_NUM_INITIAL_RANDOM_EVALUATIONS
 from syne_tune.optimizer.schedulers.searchers.bayesopt.datatypes.common \
@@ -448,27 +449,29 @@ def multiobjective_scalarized_gp_fifo_searcher_factory(**kwargs) -> Dict:
     result = _create_common_objects(**kwargs)
     model_factory = result.pop('model_factory')
     skip_optimization = result.pop('skip_optimization')
-    # We need two model factories: one for active metric (model_factory),
-    # the other for cost metric (model_factory_cost)
+    # We need k model factories, k = len(metrics).
     random_seed, _kwargs = extract_random_seed(kwargs)
-    model_factory_cost = _create_gp_standard_model(
-        hp_ranges=result['hp_ranges'],
-        active_metric=INTERNAL_COST_NAME,
-        random_seed=random_seed,
-        is_hyperband=False,
-        **_kwargs)['model_factory']
-    # Sharing debug_log attribute across models
-    model_factory_cost._debug_log = model_factory._debug_log
-    exponent_cost = kwargs.get('exponent_cost', 1.0)
+    metrics = kwargs.get('metrics')
+    scalarization_method = kwargs.get('scalarization_method')
+    model_factories = []
+    for metric in metrics:
+        model_factory = _create_gp_standard_model(
+            hp_ranges=result['hp_ranges'],
+            active_metric=metric,
+            random_seed=random_seed,
+            is_hyperband=False,
+            **_kwargs)['model_factory']
+        model_factories.append(model_factory)
+        # Sharing debug_log attribute across models
+        model_factory._debug_log = model_factories[0]._debug_log
     acquisition_class = (
-        EIpuAcquisitionFunction, dict(exponent_cost=exponent_cost))
-    # The same skip_optimization strategy applies to both models
-    skip_optimization_cost = skip_optimization
+        MultiobjectiveScalarizedEIAcquisitionFunction, dict(metrics=metrics, scalarization_method=scalarization_method))
 
-    output_model_factory = {INTERNAL_METRIC_NAME: model_factory,
-                            INTERNAL_COST_NAME: model_factory_cost}
-    output_skip_optimization = {INTERNAL_METRIC_NAME: skip_optimization,
-                                INTERNAL_COST_NAME: skip_optimization_cost}
+    # The same skip_optimization strategy applies to all models
+    output_model_factory = {INTERNAL_METRIC_NAME + str(i): model_factory
+                            for i, model_factory in enumerate(model_factories)}
+    output_skip_optimization = {INTERNAL_METRIC_NAME + str(i): skip_optimization
+                            for i, model_factory in enumerate(model_factories)}
 
     return dict(result,
                 output_model_factory=output_model_factory,
@@ -615,6 +618,7 @@ def _common_defaults(is_hyperband: bool, is_multi_output: bool) -> (Set[str], di
         default_options['use_new_code'] = True
     if is_multi_output:
         default_options['initial_scoring'] = 'acq_func'
+        # Is 'exponent_cost' needed for every multi-output model or is it cost-aware implementation specific?
         default_options['exponent_cost'] = 1.0
 
     constraints = {

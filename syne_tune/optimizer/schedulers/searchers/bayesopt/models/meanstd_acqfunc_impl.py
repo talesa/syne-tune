@@ -248,17 +248,18 @@ class MultiobjectiveScalarizedEIAcquisitionFunction(MeanStdAcquisitionFunction):
     """
     Multiobjective scalarization Expected-improvement acquisition function.
     """
+    # TODO need help with deciding how to proceed on adjusting and implementing
+    #   GP with multiple outputs and the scalarization-EI-acquisition-function.
     def __init__(
             self,
             model: SurrogateOutputModel,
-            active_metric: str = None,
-            exponent_cost: float = 1.0,
+            metrics: List[str] = None,
+            scalarization_method: str = 'random-weights',
             jitter: float = 0.01):
-        super().__init__(model, active_metric)
-        assert 0 < exponent_cost <= 1, \
-            f"exponent_cost = {exponent_cost} must lie in (0, 1]"
+        super().__init__(model, 'scalarized_objective')
+        # assert 0 < exponent_cost <= 1, \
+        #     f"exponent_cost = {exponent_cost} must lie in (0, 1]"
         self.jitter = jitter
-        self.exponent_cost = exponent_cost
         self.active_metric, self.cost_metric = _extract_active_and_secondary_metric(
             self.model_output_names, active_metric)
 
