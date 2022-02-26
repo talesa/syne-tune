@@ -70,11 +70,13 @@ __all__ = ['gp_fifo_searcher_factory',
            'cost_aware_coarse_gp_fifo_searcher_factory',
            'cost_aware_fine_gp_fifo_searcher_factory',
            'cost_aware_gp_multifidelity_searcher_factory',
+           'multiobjective_scalarized_gp_fifo_searcher_factory',
            'gp_fifo_searcher_defaults',
            'gp_multifidelity_searcher_defaults',
            'constrained_gp_fifo_searcher_defaults',
            'cost_aware_gp_fifo_searcher_defaults',
-           'cost_aware_gp_multifidelity_searcher_defaults']
+           'cost_aware_gp_multifidelity_searcher_defaults',
+           'multiobjective_scalarized_gp_fifo_searcher_defaults']
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +431,51 @@ def cost_aware_coarse_gp_fifo_searcher_factory(**kwargs) -> Dict:
                 acquisition_class=acquisition_class)
 
 
+def multiobjective_scalarized_gp_fifo_searcher_factory(**kwargs) -> Dict:
+    """
+    Returns kwargs for `MOScalarGPFIFOSearcher._create_internal`, based on
+    kwargs equal to search_options passed to and extended by scheduler (see
+    :class:`FIFOScheduler`).
+
+    :param kwargs: search_options coming from scheduler
+    :return: kwargs for MOScalarGPFIFOSearcher._create_internal
+
+    """
+    assert kwargs['scheduler'] == 'fifo', \
+        "This factory needs scheduler = 'fifo' (instead of '{}')".format(
+            kwargs['scheduler'])
+    # Common objects
+    result = _create_common_objects(**kwargs)
+    model_factory = result.pop('model_factory')
+    skip_optimization = result.pop('skip_optimization')
+    # We need two model factories: one for active metric (model_factory),
+    # the other for cost metric (model_factory_cost)
+    random_seed, _kwargs = extract_random_seed(kwargs)
+    model_factory_cost = _create_gp_standard_model(
+        hp_ranges=result['hp_ranges'],
+        active_metric=INTERNAL_COST_NAME,
+        random_seed=random_seed,
+        is_hyperband=False,
+        **_kwargs)['model_factory']
+    # Sharing debug_log attribute across models
+    model_factory_cost._debug_log = model_factory._debug_log
+    exponent_cost = kwargs.get('exponent_cost', 1.0)
+    acquisition_class = (
+        EIpuAcquisitionFunction, dict(exponent_cost=exponent_cost))
+    # The same skip_optimization strategy applies to both models
+    skip_optimization_cost = skip_optimization
+
+    output_model_factory = {INTERNAL_METRIC_NAME: model_factory,
+                            INTERNAL_COST_NAME: model_factory_cost}
+    output_skip_optimization = {INTERNAL_METRIC_NAME: skip_optimization,
+                                INTERNAL_COST_NAME: skip_optimization_cost}
+
+    return dict(result,
+                output_model_factory=output_model_factory,
+                output_skip_optimization=output_skip_optimization,
+                acquisition_class=acquisition_class)
+
+
 def cost_aware_fine_gp_fifo_searcher_factory(**kwargs) -> Dict:
     """
     Returns kwargs for `CostAwareGPFIFOSearcher._create_internal`, based on
@@ -666,3 +713,15 @@ def cost_aware_gp_multifidelity_searcher_defaults() -> (Set[str], dict, dict):
 
     """
     return _common_defaults(is_hyperband=True, is_multi_output=True)
+
+
+def multiobjective_scalarized_gp_fifo_searcher_defaults() -> (Set[str], dict, dict):
+    """
+    Returns mandatory, default_options, config_space for
+    check_and_merge_defaults to be applied to search_options for
+    :class:`MOScalarGPFIFOSearcher`.
+
+    :return: (mandatory, default_options, config_space)
+
+    """
+    return _common_defaults(is_hyperband=False, is_multi_output=True)
