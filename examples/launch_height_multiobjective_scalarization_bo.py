@@ -37,7 +37,7 @@ if __name__ == '__main__':
 
     # Multi objective scalarization BayesOpt
     # TODO This doesn't work at the moment, it's just a "proposal/draft" of the API v1 for this feature.
-    searcher = 'mo_scalar_bayesopt'
+    searcher = 'bayesopt_mo_scalar'
     # When using mo_scalar_bayesopt searcher, for now we need to set metric to 'scalarization', it's a dummy value that
     #  is ignored in pracitce.
     # TODO this is not a good design choice but good enough for now.
