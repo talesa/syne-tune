@@ -13,6 +13,7 @@
 from typing import Dict, Optional, List
 import logging
 
+import numpy as np
 import torch
 from botorch.models import SingleTaskGP
 from botorch.fit import fit_gpytorch_model
@@ -42,6 +43,7 @@ class BotorchGP(TrialScheduler):
             num_init_random_draws: int = 5,
             mode: str = "min",
             points_to_evaluate: Optional[List[Dict]] = None,
+            fantasising: bool = True,
     ):
         """
         :param config_space:
@@ -50,6 +52,7 @@ class BotorchGP(TrialScheduler):
         using the posterior of a GP built on available observations.
         :param mode: 'min' or 'max'
         :param points_to_evaluate: points to evaluate first
+        :param fantasising:
         """
         super().__init__(config_space)
         assert num_init_random_draws >= 2
@@ -69,6 +72,8 @@ class BotorchGP(TrialScheduler):
         self.inv_categorical_maps = {
             hp: dict(zip(map.values(), map.keys())) for hp, map in self.categorical_maps.items()
         }
+        self.pending_trials = {}
+        self.fantasising = fantasising
 
     def on_trial_complete(self, trial: Trial, result: Dict):
         # update available observations with final result.
@@ -78,6 +83,7 @@ class BotorchGP(TrialScheduler):
             categorical_maps=self.categorical_maps,
         ))
         self.y.append(result[self.metric_name])
+        self.pending_trials.pop(trial.trial_id)
 
     def _suggest(self, trial_id: int) -> Optional[TrialSuggestion]:
         if self.points_to_evaluate is not None and self.num_evaluations < len(self.points_to_evaluate):
@@ -92,6 +98,7 @@ class BotorchGP(TrialScheduler):
                 suggestion = self.sample_gp()
 
         self.num_evaluations += 1
+        self.pending_trials[trial_id] = suggestion
         return TrialSuggestion.start_suggestion(config=suggestion)
 
     def sample_random(self) -> Dict:
@@ -105,10 +112,19 @@ class BotorchGP(TrialScheduler):
         try:
             # First updates GP and compute its posterior, then maximum acquisition function to find candidate.
             # todo normalize input data
-            train_X = torch.Tensor(self.X)
-            train_Y = standardize(torch.Tensor(self.y).reshape(-1, 1))
+            X = self.X
+            y = self.y
+            if self.fantasising:
+                # when fantasising we draw observations for pending observations according to a unit prior
+                X += [
+                    encode_config(config=config, config_space=self.config_space, categorical_maps=self.categorical_maps)
+                    for config in self.pending_trials.values()
+                ]
+                y += list(np.random.normal(size=(len(self.pending_trials))))
 
-            self.gp = SingleTaskGP(train_X, train_Y)
+            X_tensor = torch.Tensor(X)
+            Y_tensor = standardize(torch.Tensor(y).reshape(-1, 1))
+            self.gp = SingleTaskGP(X_tensor, Y_tensor)
             mll = ExactMarginalLogLikelihood(self.gp.likelihood, self.gp)
             fit_gpytorch_model(mll)
 
@@ -119,7 +135,7 @@ class BotorchGP(TrialScheduler):
                 maximize=self.mode == 'max'
             )
 
-            bounds = torch.stack([train_X.min(axis=0).values, train_X.max(axis=0).values])
+            bounds = torch.stack([X_tensor.min(axis=0).values, X_tensor.max(axis=0).values])
             candidate, acq_value = optimize_acqf(
                 UCB, bounds=bounds, q=1, num_restarts=5, raw_samples=20,
             )
