@@ -5,7 +5,7 @@ import syne_tune.search_space as sp
 
 from benchmarking.blackbox_repository import load, add_surrogate
 from benchmarking.blackbox_repository.blackbox_tabular import BlackboxTabular
-from benchmarking.blackbox_repository.conversion_scripts.scripts.hf_cloud_ag import generate_hf_cloud
+from benchmarking.blackbox_repository.conversion_scripts.scripts.hf_cloud import import_hf_cloud
 from benchmarking.blackbox_repository.simulated_tabular_backend import BlackboxRepositoryBackend, UserBlackboxBackend
 
 from sklearn.neighbors import KNeighborsRegressor
@@ -51,7 +51,7 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
 
     # loading data and querying stuff
-    bb_dict = generate_hf_cloud()
+    bb_dict = import_hf_cloud()
     blackbox = bb_dict["imdb"]
 
     config = {
