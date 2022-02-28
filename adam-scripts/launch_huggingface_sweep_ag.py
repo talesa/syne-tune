@@ -22,8 +22,8 @@ import numpy as np
 from sagemaker.huggingface import HuggingFace
 
 import syne_tune
-from benchmarks.definitions.distilbert_on_imdb import distilbert_imdb_default_params, distilbert_imdb_benchmark
-from syne_tune.backend.sagemaker_backend.sagemaker_backend import SagemakerBackend
+from benchmarking.definitions.definition_distilbert_on_imdb import distilbert_imdb_default_params, distilbert_imdb_benchmark
+from syne_tune.backend.sagemaker_backend.sagemaker_backend import SageMakerBackend
 from syne_tune.backend.sagemaker_backend.sagemaker_utils import get_execution_role
 from syne_tune.optimizer.baselines import RandomSearch
 from syne_tune.remote.remote_launcher import RemoteLauncher
@@ -197,7 +197,7 @@ if __name__ == '__main__':
     )
 
     # SageMaker backend
-    backend = SagemakerBackend(
+    backend = SageMakerBackend(
         sm_estimator=huggingface_estimator,
         metrics_names=[metric],
         inputs={

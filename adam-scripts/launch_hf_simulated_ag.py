@@ -3,10 +3,10 @@ import numpy as np
 import pandas as pd
 import syne_tune.search_space as sp
 
-from blackbox_repository import load, add_surrogate
-from blackbox_repository.blackbox_tabular import BlackboxTabular
-from blackbox_repository.conversion_scripts.scripts.hf_cloud_ag import generate_hf_cloud
-from blackbox_repository.tabulated_benchmark import BlackboxRepositoryBackend, UserBlackboxBackend
+from benchmarking.blackbox_repository import load, add_surrogate
+from benchmarking.blackbox_repository.blackbox_tabular import BlackboxTabular
+from benchmarking.blackbox_repository.conversion_scripts.scripts.hf_cloud_ag import generate_hf_cloud
+from benchmarking.blackbox_repository.simulated_tabular_backend import BlackboxRepositoryBackend, UserBlackboxBackend
 
 from sklearn.neighbors import KNeighborsRegressor
 
@@ -33,7 +33,7 @@ def simulate_benchmark(backend, metric):
 
     # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
     tuner = Tuner(
-        backend=backend,
+        trial_backend=backend,
         scheduler=scheduler,
         stop_criterion=stop_criterion,
         n_workers=n_workers,

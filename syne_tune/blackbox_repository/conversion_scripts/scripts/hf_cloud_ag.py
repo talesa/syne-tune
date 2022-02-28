@@ -3,7 +3,8 @@ from typing import Dict, Tuple, Optional
 import pandas as pd
 import numpy as np
 
-from blackbox_repository import load, Blackbox, BlackboxOffline, add_surrogate
+from benchmarking.blackbox_repository import load, BlackboxOffline, add_surrogate
+from benchmarking.blackbox_repository.blackbox import Blackbox
 import syne_tune.search_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.util import s3_experiment_path
