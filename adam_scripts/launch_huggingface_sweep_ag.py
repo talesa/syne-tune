@@ -64,16 +64,20 @@ if __name__ == '__main__':
         # 'ml.g5.2xlarge',
         # 'ml.g5.4xlarge',
         # 'ml.g5.8xlarge',
-        'ml.g5.12xlarge',
+        # 'ml.g5.12xlarge',
         # 'ml.g5.24xlarge',
+        # 'ml.p3.16xlarge',
+        'ml.p3dn.24xlarge',
+        # 'ml.p4d.24xlarge',
     ]
 
     #       GPU  RAM max_bs_imdb
     # g4dn T4   16GB          32
-    # g5   A10G 24GB
-    # p2   K80  24GB
-    # p3   V100 32GB
-    # p4d  A100 40GB
+    # g5   A10G 24GB          52
+    # p2   K80  12GB          24
+    # p3   V100 16GB          32
+    # p3dn V100 32GB          64
+    # p4d  A100 40GB          80
 
     # instance_type_config_space = dict(
     #     num_gpus=sp.logfinrange(1, 8, 3),  # [1, 4, 8]
@@ -83,20 +87,22 @@ if __name__ == '__main__':
     # instance_type_config_space['num_gpus'].sample()
 
     # tuner_job_name = 'test-g4dn-bs-26'
-    tuner_job_name = 'speed-bs-it-nw-new'
-    n_workers = 40
+    tuner_job_name = 'speed-bs-it-nw-p3dn-24'
+    n_workers = 10
 
-    per_device_train_batch_size_list = [4, 8, 16, 24, 32, 40, 48]
-    dataloader_num_workers_list = [0, 1]
+    # per_device_train_batch_size_list = [4, 8, 16, 24, 32, 40, 48]
+    # dataloader_num_workers_list = list(range(2, 7))
+    # seeds = [0, 1, 2]
+
+    # per_device_train_batch_size_list = [52, 60, 68, 76, 84, 96]
+    per_device_train_batch_size_list = [64]
+    dataloader_num_workers_list = [0, 1, 2]
     seeds = [0, 1, 2]
-
-    per_device_train_batch_size_list = [52]
-    dataloader_num_workers_list = [0]
-    seeds = [0]
 
     config_space = dict(
         per_device_train_batch_size=sp.choice(per_device_train_batch_size_list),  # TODO select me
         # per_device_train_batch_size=26,
+        # fp16=1,
         n_train_data=25000,
         epochs=3,
         per_device_eval_batch_size=1,
@@ -188,7 +194,7 @@ if __name__ == '__main__':
         pytorch_version='1.6',
         py_version='py36',
         role=get_execution_role(),
-        dependencies=[root / "benchmarks"],
+        dependencies=[root / "benchmarking"],
         metric_definitions=metric_definitions,
         # environment=dict(HF_DATASETS_OFFLINE='1', TRANSFORMERS_OFFLINE='1',),
                          # TRANSFORMERS_CACHE='/opt/ml/input/data/hfcache'),
@@ -216,7 +222,7 @@ if __name__ == '__main__':
     )
 
     tuner = Tuner(
-        backend=backend,
+        trial_backend=backend,
         scheduler=scheduler,
         stop_criterion=stop_criterion,
         n_workers=n_workers,
@@ -225,11 +231,11 @@ if __name__ == '__main__':
     )
     tuner.run()
 
-    remote_launcher = RemoteLauncher(
-        tuner=tuner,
-        instance_type='ml.m5.large',  # TODO you can use instance_type='local'
-        tuner_name=tuner_job_name,
-        dependencies=[str(root / "benchmarks")],
-        sleep_time=5.0,
-    )
-    remote_launcher.run(wait=False)
+    # remote_launcher = RemoteLauncher(
+    #     tuner=tuner,
+    #     instance_type='ml.m5.large',  # TODO you can use instance_type='local'
+    #     tuner_name=tuner_job_name,
+    #     dependencies=[str(root / "benchmarking")],
+    #     sleep_time=5.0,
+    # )
+    # remote_launcher.run(wait=False)

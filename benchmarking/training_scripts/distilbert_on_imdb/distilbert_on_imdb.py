@@ -94,6 +94,7 @@ def objective(config):
         # avoid filling disk
         save_strategy="no",
         seed=int(config['seed']),
+        fp16=bool(config['fp16']),
     )
 
     # Create Trainer instance
@@ -169,6 +170,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_interval', type=int, default=0)
     parser.add_argument('--dataloader_num_workers', type=int, default=0)
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--fp16', type=int, default=0)
     # parser.add_argument('--keep_in_memory', type=int, default=0)
     parser.add_argument('--trial_id', type=str)
     add_to_argparse(parser, _config_space)
