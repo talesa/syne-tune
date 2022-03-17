@@ -38,9 +38,9 @@ class HFCloudBlackbox(Blackbox):
         self.configuration_space["instance_type"] = sp.choice(list(self.instance_speed_cost_dict.keys()))
         self.objectives_names = bb.objectives_names + ["cost"]
         # FIXME HACK
-        # bb.fidelity_values = (np.arange(14)+1)*100
-        N = 14  # FIXME HACK
-        bb.fidelity_values = [i * 100 for i in range(1, N + 1)]  # FIXME HACK
+        # TODO N is the minimum value of any of the runs, so setting this ensures that none fail
+        N = bb.df.reset_index().groupby('trial_id').step.max().min()
+        bb.fidelity_values = list(range(1, N + 1))  # FIXME HACK
         super(HFCloudBlackbox, self).__init__(
             configuration_space=self.configuration_space,
             fidelity_space=bb.fidelity_space,
@@ -101,8 +101,7 @@ def instance_speed_cost(baseline_instance_type: str, max_instance: int = None) -
     if csv_path.exists():
         df = pd.read_csv(csv_path)
     else:
-        tuner_job_name = 'speed-bs-it-2022-02-07-23-12-47-916'
-        df = pd.read_csv(s3_experiment_path(tuner_name=tuner_job_name) + '/train_runtime.csv')
+        df = pd.read_csv(s3_experiment_path(tuner_name='speed-bs-it-2022-02-07-23-12-47-916') + '/train_runtime.csv')
         # df = syne_tune.experiments.load_experiment(tuner_job_name).results
         df.to_csv(csv_path)
 
@@ -144,6 +143,9 @@ def serialize_hf_cloud():
     df = df.rename(columns=columns_to_rename)
     # df = df.dropna(subset=['config_per_device_train_batch_size'])
 
+    # Changing steps to contiguous integers allows us to run multi-fidelity algorithms like ASHA easily.
+    df.step = (df.step / 100).astype(np.int64)
+
     configuration_space = dict(
         per_device_train_batch_size=sp.choice([2, 4, 8, 12, 16]),
         learning_rate=sp.loguniform(1e-7, 1e-4),
@@ -151,8 +153,8 @@ def serialize_hf_cloud():
     )
 
     # TODO shouldn't fidelity_values be implied given fidelity_space?
-    N = 14
-    fidelity_values = [i*100 for i in range(1, N+1)]
+    N = df.reset_index().groupby('trial_id').step.max().min()
+    fidelity_values = list(range(1, N+1))
     fidelity_space = dict(
         step=sp.choice(fidelity_values),
         # TODO What to do since “step” (number of gradient updates) implicitly defines different fidelity measures for different batch_sizes?
