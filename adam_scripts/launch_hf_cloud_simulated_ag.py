@@ -44,6 +44,8 @@ if __name__ == '__main__':
         elapsed_time_attr=elapsed_time_attr,
     )
 
+    backend.blackbox.configuration_space['per_device_train_batch_size'] = sp.choice([4, 8, 12, 16])
+
     # Random search without stopping
     # scheduler = RandomSearch(
     #     backend.blackbox.configuration_space,

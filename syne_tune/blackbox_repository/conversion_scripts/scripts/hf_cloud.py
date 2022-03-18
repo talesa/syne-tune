@@ -18,7 +18,6 @@ import syne_tune.experiments
 METRIC_VALID_ERROR = 'metric_training_loss'
 METRIC_TIME_THIS_RESOURCE = 'metric_train_runtime'
 # RESOURCE_ATTR = 'hp_epoch'
-BASELINE_INSTANCE_TYPE = 'ml.g4dn.xlarge'
 
 SOURCE_SYNE_TUNE_JOB_NAMES = (
     # 'loss-lr-wd-bs-2022-02-04-12-09-26-911',  # Old schema, i.e. names of the fields, don't use.
@@ -33,11 +32,8 @@ class HFCloudBlackbox(Blackbox):
     Dataset generated using examples/launch_huggingface_sweep_ag.py
     """
     def __init__(self, bb):
-        self.instance_speed_cost_dict = instance_speed_cost(baseline_instance_type=BASELINE_INSTANCE_TYPE)
         self.configuration_space = bb.configuration_space
-        self.configuration_space["instance_type"] = sp.choice(list(self.instance_speed_cost_dict.keys()))
         self.objectives_names = bb.objectives_names + ["cost"]
-        # FIXME HACK
         # TODO N is the minimum value of any of the runs, so setting this ensures that none fail
         N = bb.df.reset_index().groupby('trial_id').step.max().min()
         bb.fidelity_values = list(range(1, N + 1))  # FIXME HACK
@@ -51,6 +47,12 @@ class HFCloudBlackbox(Blackbox):
                                 surrogate=KNeighborsRegressor(n_neighbors=3),
                                 hps_to_exclude=('instance_type',))
 
+        assert len(bb.df.config_st_instance_type.unique()) == 1, \
+            "All of the trials should have been performed on the same instance type."
+        baseline_instance_type = bb.df.config_st_instance_type.unique()[0]
+        self.instance_speed_cost_dict = instance_speed_cost(baseline_instance_type=baseline_instance_type)
+        self.configuration_space["instance_type"] = sp.choice(np.unique(np.array(list(self.instance_speed_cost_dict.keys()))[:, 0]).tolist())
+
     def _objective_function(
             self,
             configuration: Dict,
@@ -60,7 +62,7 @@ class HFCloudBlackbox(Blackbox):
         if 'instance_type' not in configuration:
             raise ValueError(f'No instance_type provided in the configuration: {configuration}')
         instance_type = configuration.pop('instance_type')
-        relative_time_factor, cost_per_second = self.instance_speed_cost_dict[instance_type]
+        relative_time_factor, cost_per_second = self.instance_speed_cost_dict[(instance_type, configuration['per_device_train_batch_size'])]
 
         res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
 
@@ -87,7 +89,7 @@ class HFCloudBlackbox(Blackbox):
         return self.bb.hyperparameter_objectives_values()
 
 
-def instance_speed_cost(baseline_instance_type: str, max_instance: int = None) -> Dict[str, Tuple[float, float]]:
+def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, float]]:
     """
     :param type:
     :return: dictionary from instance to relative-time and cost per-second instance.
@@ -107,17 +109,20 @@ def instance_speed_cost(baseline_instance_type: str, max_instance: int = None) -
 
     time_col = 'train_runtime'
 
+    compute_config_params = ('config_st_instance_type',)
+    model_config_params_affecting_performance = ('config_per_device_train_batch_size',)
+
     # gets time per batch relative to the time for a baseline instance
     # taking the shortest train_runtime per instance-type which most of the time corresponds to the largest batch_size
-    # TODO account for different batch_sizes here
-    relative_time_per_instance = df.groupby('config_st_instance_type')[time_col].min().sort_values()
-    relative_time_per_instance /= relative_time_per_instance[baseline_instance_type]
-    if max_instance is None:
-        max_instance = len(relative_time_per_instance)
+    # TODO if you want to run higher batch size (ones that you could run on larger instance types than g5) use gradient accumulation
+    time_per_instance = (
+        df.groupby(['config_st_instance_type', 'config_per_device_train_batch_size'])[time_col].mean())
+    relative_time_per_instance = time_per_instance / time_per_instance.loc[baseline_instance_type]
     return {
         # gets the cost per second
-        instance: (relative_time_per_instance[instance], instance_hourly_cost[instance] / 3600.)
-        for instance in relative_time_per_instance.index[:max_instance]
+        (instance, batch_size) : (relative_time_per_instance.loc[(instance, batch_size)],
+                                  instance_hourly_cost[instance] / 3600.)
+        for (instance, batch_size) in relative_time_per_instance.index
     }
 
 
@@ -130,6 +135,9 @@ def import_hf_cloud():
 def serialize_hf_cloud():
     df = pd.concat(tuple(syne_tune.experiments.load_experiment(job_name).results
                          for job_name in SOURCE_SYNE_TUNE_JOB_NAMES))
+
+    assert len(df.config_st_instance_type.unique()) == 1, \
+        "All of the trials should have been performed on the same instance type."
 
     # Rename some columns
     # TODO if we regenerate the dataset some renaming will change due to updates in the generation code
