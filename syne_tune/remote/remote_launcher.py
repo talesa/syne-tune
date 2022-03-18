@@ -128,9 +128,9 @@ class RemoteLauncher:
 
         # Save entrypoint script and content in a folder to be send by sagemaker.
         # This is required so that the entrypoint is found on Sagemaker.
-        source_dir = str(self.get_source_dir())
-        logger.info(f"copy endpoint files from {source_dir} to {upload_dir}")
-        shutil.copytree(source_dir, upload_dir)
+        # source_dir = str(self.get_source_dir())
+        # logger.info(f"copy endpoint files from {source_dir} to {upload_dir}")
+        # shutil.copytree(source_dir, upload_dir)
 
         backup = str(self.tuner.trial_backend.entrypoint_path())
 

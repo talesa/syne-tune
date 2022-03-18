@@ -18,12 +18,12 @@ import subprocess
 import tarfile
 from ast import literal_eval
 from pathlib import Path
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Union
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from sagemaker.estimator import Framework
+from sagemaker.estimator import Estimator, Framework
 
 import syne_tune
 from syne_tune.backend.trial_status import TrialResult
@@ -193,8 +193,9 @@ def add_syne_tune_dependency(sm_estimator):
     sm_estimator.dependencies = sm_estimator.dependencies + [str(Path(syne_tune.__path__[0]))]
 
 
+# TODO HERE
 def sagemaker_fit(
-        sm_estimator: Framework,
+        sm_estimator: Union[Estimator, Framework],
         hyperparameters: Dict[str, object],
         checkpoint_s3_uri: Optional[str] = None,
         wait: bool = False,
@@ -212,8 +213,15 @@ def sagemaker_fit(
     :return: name of sagemaker job
     """
     experiment = sm_estimator
-    experiment._hyperparameters = hyperparameters
-    experiment.checkpoint_s3_uri = checkpoint_s3_uri
+    if issubclass(type(experiment), Framework):
+        experiment._hyperparameters = hyperparameters
+        experiment.checkpoint_s3_uri = checkpoint_s3_uri
+    elif issubclass(type(experiment), Estimator):
+        # excluded_hyperparams = ("st_checkpoint_dir",)
+        experiment.set_hyperparameters(**{k: v for k, v in hyperparameters.items() if not k.startswith('st_')})
+        experiment.checkpoint_s3_uri = checkpoint_s3_uri
+    else:
+        raise ValueError("experiment is neither Framework nor Estimator.")
 
     experiment.fit(wait=wait, job_name=job_name, *sagemaker_fit_args, **sagemaker_fit_kwargs)
 

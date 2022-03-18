@@ -244,6 +244,7 @@ class Tuner:
         self._set_metadata(res, ST_TUNER_CREATION_TIMESTAMP, time.time())
         self._set_metadata(res, 'metric_names', self.scheduler.metric_names())
         self._set_metadata(res, 'metric_mode', self.scheduler.metric_mode())
+        # TODO DeepAR to run with an Estimator rather than Framework remove this
         self._set_metadata(res, 'entrypoint', self.trial_backend.entrypoint_path().stem)
         self._set_metadata(res, 'backend', str(type(self.trial_backend).__name__))
         self._set_metadata(res, 'scheduler_name', str(self.scheduler.__class__.__name__))
@@ -434,9 +435,12 @@ class Tuner:
                 if trial_id not in done_trials \
                         or done_trials[trial_id][1] != Status.paused:
                     logger.info(f"Trial trial_id {trial_id} completed.")
-                assert trial_id in self.last_seen_result_per_trial, \
-                    f"trial {trial_id} completed and no metrics got observed"
-                last_result = self.last_seen_result_per_trial[trial_id]
+                # assert trial_id in self.last_seen_result_per_trial, \
+                #     f"trial {trial_id} completed and no metrics got observed"
+                if trial_id in self.last_seen_result_per_trial:
+                    last_result = self.last_seen_result_per_trial[trial_id]
+                else:
+                    last_result = {}
                 if not trial_id in done_trials:
                     self.scheduler.on_trial_complete(trial, last_result)
                 for callback in callbacks:

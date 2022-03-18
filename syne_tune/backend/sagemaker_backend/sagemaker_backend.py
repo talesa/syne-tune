@@ -14,7 +14,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 import boto3
 from botocore.exceptions import ClientError
 import numpy as np
@@ -30,6 +30,7 @@ from syne_tune.backend.sagemaker_backend.sagemaker_utils import \
     sagemaker_search, get_log, sagemaker_fit, metric_definitions_from_names, \
     add_syne_tune_dependency, map_identifier_limited_length, \
     s3_copy_files_recursively, s3_delete_files_recursively
+from sagemaker.estimator import Estimator, Framework
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class SageMakerBackend(TrialBackend):
 
     def __init__(
             self,
-            sm_estimator: Framework,
+            sm_estimator: Union[Estimator, Framework],
             metrics_names: Optional[List[str]] = None,
             s3_path: Optional[str] = None,
             delete_checkpoints: bool = False,
@@ -76,7 +77,8 @@ class SageMakerBackend(TrialBackend):
         self.sm_estimator.base_job_name = map_identifier_limited_length(
             base_job_name)
 
-        add_syne_tune_dependency(self.sm_estimator)
+        if issubclass(type(sm_estimator), Framework):
+            add_syne_tune_dependency(self.sm_estimator)
 
         self.job_id_mapping = {}
         self.sagemaker_fit_kwargs = sagemaker_fit_kwargs
