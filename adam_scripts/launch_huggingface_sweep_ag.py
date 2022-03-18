@@ -61,14 +61,15 @@ if __name__ == '__main__':
         # 'ml.g4dn.8xlarge',
         # 'ml.g4dn.12xlarge',
         # 'ml.g5.xlarge',
-        # 'ml.g5.2xlarge',
-        # 'ml.g5.4xlarge',
-        # 'ml.g5.8xlarge',
-        # 'ml.g5.12xlarge',
-        # 'ml.g5.24xlarge',
+        'ml.g5.2xlarge',
+        'ml.g5.4xlarge',
+        'ml.g5.8xlarge',
+        'ml.g5.12xlarge',
+        'ml.g5.24xlarge',
         # 'ml.p3.16xlarge',
-        'ml.p3dn.24xlarge',
+        # 'ml.p3dn.24xlarge',
         # 'ml.p4d.24xlarge',
+        # 'ml.g5.48xlarge',
     ]
 
     #       GPU  RAM max_bs_imdb
@@ -76,8 +77,8 @@ if __name__ == '__main__':
     # g5   A10G 24GB          52
     # p2   K80  12GB          24
     # p3   V100 16GB          32
-    # p3dn V100 32GB          64
-    # p4d  A100 40GB          80
+    # p3dn V100 32GB          68
+    # p4d  A100 40GB          88
 
     # instance_type_config_space = dict(
     #     num_gpus=sp.logfinrange(1, 8, 3),  # [1, 4, 8]
@@ -87,24 +88,47 @@ if __name__ == '__main__':
     # instance_type_config_space['num_gpus'].sample()
 
     # tuner_job_name = 'test-g4dn-bs-26'
-    tuner_job_name = 'speed-bs-it-nw-p3dn-24'
-    n_workers = 10
+
+    n_workers = 1
+    # single_job_max_run = 10 * 60  # 10min
+
+    # tuner_job_name = 'speed-bs-it-nw-p3dn-24'
+    # instance_types = ['ml.p3dn.24xlarge',]
+    # per_device_train_batch_size_list = [68]
+
+    # tuner_job_name = 'speed-bs-it-nw-p4d-24'
+    # instance_types = ['ml.p4d.24xlarge',]
+    # per_device_train_batch_size_list = [88]
+    single_job_max_run = 5 * 60  # 5min
+
+    # tuner_job_name = 'speed-bs-it-nw-g5-48'
+    # instance_types = ['ml.g5.48xlarge',]
+    # per_device_train_batch_size_list = [52]
+
+    tuner_job_name = 'speed-bs-it-nw-g5Xxlarge-bs52'
+    # instance_types = ['ml.g5.xlarge',]
+    per_device_train_batch_size_list = [52]
+
+    n_workers = 100
+
 
     # per_device_train_batch_size_list = [4, 8, 16, 24, 32, 40, 48]
     # dataloader_num_workers_list = list(range(2, 7))
     # seeds = [0, 1, 2]
 
     # per_device_train_batch_size_list = [52, 60, 68, 76, 84, 96]
-    per_device_train_batch_size_list = [64]
-    dataloader_num_workers_list = [0, 1, 2]
+    # per_device_train_batch_size_list = [32]
+    dataloader_num_workers_list = [0, 1]
     seeds = [0, 1, 2]
+    # dataloader_num_workers_list = [0, 1, 2]
+    # seeds = [0, 1, 2]
 
     config_space = dict(
         per_device_train_batch_size=sp.choice(per_device_train_batch_size_list),  # TODO select me
         # per_device_train_batch_size=26,
         # fp16=1,
         n_train_data=25000,
-        epochs=3,
+        epochs=100,
         per_device_eval_batch_size=1,
         n_eval_data=1,
         log_interval=100,
@@ -116,7 +140,6 @@ if __name__ == '__main__':
         # st_instance_type='ml.g4dn.xlarge',
         seed=sp.choice(seeds),  # TODO select me
         max_resource_level=default_params['max_resource_level'])
-    single_job_max_run = 10*60  # 10min
     stop_criterion = StoppingCriterion(
         # max_wallclock_time=10 * 60 * 60,  # 10h
         max_num_trials_finished=int(np.prod(tuple(map(len, (per_device_train_batch_size_list, dataloader_num_workers_list, instance_types, seeds))))),
