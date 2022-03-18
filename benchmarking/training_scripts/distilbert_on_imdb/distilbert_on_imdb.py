@@ -81,8 +81,9 @@ def objective(config):
         per_device_train_batch_size=config['per_device_train_batch_size'],
         per_device_eval_batch_size=config['per_device_eval_batch_size'],
         dataloader_num_workers=config['dataloader_num_workers'],
-        evaluation_strategy='steps' if config['eval_interval'] != 0 else 'epoch',
-        eval_steps=config['eval_interval'] // config['per_device_train_batch_size'] if config['eval_interval'] != 0 else 1,
+        evaluation_strategy='steps' if config['eval_interval'] != 0 else "no",
+        eval_steps=config['eval_interval'] // (config['per_device_train_batch_size'] * float(os.environ['SM_NUM_GPUS']))
+                   if config['eval_interval'] != 0 else 1,
         logging_strategy='steps',
         logging_steps=config['log_interval'] if config['log_interval'] != 0 else
         round(config['n_train_data'] / config['per_device_train_batch_size'] / float(os.environ['SM_NUM_GPUS'])),
