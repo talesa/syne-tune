@@ -82,6 +82,7 @@ class BotorchGP(TrialScheduler):
             config_space=self.config_space,
             categorical_maps=self.categorical_maps,
         ))
+        # TODO check the format of this encoded config from above
         self.y.append(result[self.metric_name])
         self.pending_trials.pop(trial.trial_id)
 
@@ -116,6 +117,7 @@ class BotorchGP(TrialScheduler):
             y = self.y
             if self.fantasising:
                 # when fantasising we draw observations for pending observations according to a unit prior
+                # TODO sample from the previous posterior instead from a standard normal?
                 X += [
                     encode_config(config=config, config_space=self.config_space, categorical_maps=self.categorical_maps)
                     for config in self.pending_trials.values()
@@ -123,6 +125,7 @@ class BotorchGP(TrialScheduler):
                 y += list(np.random.normal(size=(len(self.pending_trials))))
 
             X_tensor = torch.Tensor(X)
+            # from here making use of botorch utils
             Y_tensor = standardize(torch.Tensor(y).reshape(-1, 1))
             self.gp = SingleTaskGP(X_tensor, Y_tensor)
             mll = ExactMarginalLogLikelihood(self.gp.likelihood, self.gp)
@@ -132,7 +135,7 @@ class BotorchGP(TrialScheduler):
             UCB = UpperConfidenceBound(
                 self.gp,
                 beta=0.1,
-                maximize=self.mode == 'max'
+                maximize=(self.mode == 'max')
             )
 
             bounds = torch.stack([X_tensor.min(axis=0).values, X_tensor.max(axis=0).values])
