@@ -5,7 +5,7 @@ import numpy as np
 
 from sklearn.neighbors import KNeighborsRegressor
 
-from benchmarking.blackbox_repository import load, BlackboxOffline, add_surrogate, serialize
+# from benchmarking.blackbox_repository import load, BlackboxOffline, add_surrogate, serialize
 from benchmarking.blackbox_repository.blackbox import Blackbox
 import syne_tune.config_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
@@ -14,10 +14,6 @@ from benchmarking.blackbox_repository.blackbox_offline import serialize, Blackbo
 from benchmarking.blackbox_repository.conversion_scripts.utils import repository_path, upload
 import syne_tune.experiments
 
-
-METRIC_VALID_ERROR = 'metric_training_loss'
-METRIC_TIME_THIS_RESOURCE = 'metric_train_runtime'
-# RESOURCE_ATTR = 'hp_epoch'
 
 SOURCE_SYNE_TUNE_JOB_NAMES = (
     'speed-bs-it-nw-new-2022-02-21-18-05-01-921',  # big sweep
@@ -35,6 +31,8 @@ BLACKBOX_NAME = 'hf-cloud-speed'
 
 
 def serialize_hf_cloud_speed():
+    # TODO account for the failed attempts
+
     dfs_to_concat = list()
     trial_id_max = -1
     for tuner_job_name in SOURCE_SYNE_TUNE_JOB_NAMES:
@@ -69,28 +67,38 @@ def serialize_hf_cloud_speed():
         dfg.config_st_instance_type.max(),
         dfg.config_per_device_train_batch_size.max(),
         dfg.config_dataloader_num_workers.max(),
+        dfg.st_worker_time.max(),
     ], axis=1)
     b.columns = ['samples_processed_per_second'] + list(b.columns)[1:]
+    # TODO investigate where are the NaNs coming from
+    #  - probably some of the runs not having the measurement for at least two steps - having too large batch size to
+    #    record 200.
 
-    c = b.groupby(list(b.columns)[1:]).agg({'samples_processed_per_second': ['mean', 'std', 'count']})
+    b = b.dropna(subset=['samples_processed_per_second'], how='all')
 
-    dfrt = c.loc[:, ('samples_processed_per_second', 'mean')].reset_index()
-    dfrt.columns = (
+    c = b.groupby([
         'config_st_instance_type',
         'config_per_device_train_batch_size',
-        'config_dataloader_num_workers',
-        'samples_processed_per_second',
-    )
+        'config_dataloader_num_workers']).agg(
+        {
+            'samples_processed_per_second': ['mean'],
+            'st_worker_time': ['mean'],
+        })
+
+    dfrt = c.reset_index()
+    dfrt.columns = [v[0] for v in list(c.reset_index().columns)]
 
     dfrt['training-runtime-per-sample'] = 1. / dfrt['samples_processed_per_second']
     dfrt['training-cost-per-sample'] = (
             dfrt['training-runtime-per-sample'] *
             dfrt.config_st_instance_type.map(lambda x: instance_info(x).cost_per_hour))
 
+    dfrt['step'] = 1
+
     configuration_space = dict(
         config_st_instance_type=sp.choice(dfrt.config_st_instance_type.unique().tolist()),
-        config_per_device_train_batch_size=sp.choice(dfrt.config_per_device_train_batch_size.unique().tolist()),
-        config_dataloader_num_workers=sp.choice([0, 1, 2]),
+        config_per_device_train_batch_size=sp.finrange(4.0, 88.0, 22),  # [4, 8, ..., 88]
+        config_dataloader_num_workers=sp.finrange(0, 2, 3),  # [0, 1, 2]
     )
 
     serialize(
@@ -98,6 +106,8 @@ def serialize_hf_cloud_speed():
             'imdb': BlackboxOffline(
                 df_evaluations=dfrt,
                 configuration_space=configuration_space,
+                fidelity_space={'step': sp.choice([1, ])},
+                fidelity_values={'step': [1, ]},
                 objectives_names=['training-runtime-per-sample', 'training-cost-per-sample'],
             )
         },
