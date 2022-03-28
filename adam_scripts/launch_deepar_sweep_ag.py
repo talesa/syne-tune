@@ -28,7 +28,7 @@ from syne_tune.optimizer.baselines import RandomSearch
 from syne_tune.remote.remote_launcher import RemoteLauncher
 from syne_tune.tuner import Tuner
 from syne_tune.stopping_criterion import StoppingCriterion
-import syne_tune.search_space as sp
+import syne_tune.config_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import select_instance_type
 
 

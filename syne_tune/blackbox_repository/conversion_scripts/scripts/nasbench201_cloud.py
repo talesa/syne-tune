@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 from blackbox_repository import load, Blackbox
-import syne_tune.search_space as sp
+import syne_tune.config_space as sp
 from blackbox_repository.conversion_scripts.scripts.nasbench201_import import METRIC_VALID_ERROR, \
     METRIC_TIME_THIS_RESOURCE
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
