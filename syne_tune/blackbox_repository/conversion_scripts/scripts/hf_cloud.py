@@ -7,7 +7,7 @@ from sklearn.neighbors import KNeighborsRegressor
 
 from benchmarking.blackbox_repository import load, BlackboxOffline, add_surrogate, serialize
 from benchmarking.blackbox_repository.blackbox import Blackbox
-import syne_tune.search_space as sp
+import syne_tune.config_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.util import s3_experiment_path
 from benchmarking.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
@@ -29,7 +29,7 @@ BLACKBOX_NAME = 'hf-cloud'
 
 class HFCloudBlackbox(Blackbox):
     """
-    Dataset generated using examples/launch_huggingface_sweep_ag.py
+    Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
     """
     def __init__(self, bb):
         self.configuration_space = bb.configuration_space
@@ -133,8 +133,22 @@ def import_hf_cloud():
 
 
 def serialize_hf_cloud():
-    df = pd.concat(tuple(syne_tune.experiments.load_experiment(job_name).results
-                         for job_name in SOURCE_SYNE_TUNE_JOB_NAMES))
+    dfs_to_concat = list()
+    trial_id_max = -1
+    for tuner_job_name in SOURCE_SYNE_TUNE_JOB_NAMES:
+        df_temp = syne_tune.experiments.load_experiment(tuner_job_name).results
+        df_temp['trial_id'] += trial_id_max + 1
+        trial_id_max = df_temp['trial_id'].max()
+        dfs_to_concat.append(df_temp)
+    df = pd.concat(dfs_to_concat).reset_index()
+
+    # Drop trials which have duplicate entries.
+    # The reason for why some trials have these duplicates is not understood.
+    # Doing this to ensure correctness.
+    temp = df.groupby(['trial_id', 'step']).loss.count().reset_index()
+    trial_ids_to_be_deleted = temp[temp.loss > 1].trial_id.unique()
+
+    df.drop(df.index[df['trial_id'].isin(trial_ids_to_be_deleted)], inplace=True)
 
     assert len(df.config_st_instance_type.unique()) == 1, \
         "All of the trials should have been performed on the same instance type."
