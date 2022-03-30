@@ -3,7 +3,8 @@ import numpy as np
 import syne_tune.config_space as cs
 
 
-def encode_config(config_space: Dict, config: Dict, categorical_maps: Dict) -> np.array:
+def encode_config(config_space: Dict, config: Dict, categorical_maps: Dict,
+                  cat_to_onehot: bool = True, normalize_bounded_domains: bool = True) -> np.array:
     """
     Encode a configuration into a vector that can be decoded back with `_decode_config`.
     :param config_space:
@@ -15,11 +16,14 @@ def encode_config(config_space: Dict, config: Dict, categorical_maps: Dict) -> n
 
     def numerize(value, domain, categorical_map):
         if isinstance(domain, cs.Categorical):
-            res = np.zeros(len(domain))
-            res[categorical_map[value]] = 1
+            if cat_to_onehot:
+                res = np.zeros(len(domain))
+                res[categorical_map[value]] = 1
+            else:
+                res = categorical_map[value]
             return res
         else:
-            if hasattr(domain, "lower") and hasattr(domain, "upper"):
+            if normalize_bounded_domains and hasattr(domain, "lower") and hasattr(domain, "upper"):
                 return [(value - domain.lower) / (domain.upper - domain.lower)]
             else:
                 return [value]
@@ -31,7 +35,8 @@ def encode_config(config_space: Dict, config: Dict, categorical_maps: Dict) -> n
     ])
 
 
-def decode_config(config_space: Dict, encoded_vector: np.array, inv_categorical_maps: Dict) -> Dict:
+def decode_config(config_space: Dict, encoded_vector: np.array, inv_categorical_maps: Dict,
+                  cat_to_onehot: bool = True, normalize_bounded_domains: bool = True) -> Dict:
     """
     Return a config dictionary given an encoded vector.
     :param config_space:
@@ -47,11 +52,14 @@ def decode_config(config_space: Dict, encoded_vector: np.array, inv_categorical_
             return domain
         else:
             if isinstance(domain, cs.Categorical):
-                values = 1.0 * (values == values.max())
-                index = max(np.arange(len(domain)) * values)
+                if cat_to_onehot:
+                    values = 1.0 * (values == values.max())
+                    index = max(np.arange(len(domain)) * values)
+                else:
+                    index = values[0]
                 return categorical_map[index]
             else:
-                if hasattr(domain, "lower") and hasattr(domain, "upper"):
+                if normalize_bounded_domains and hasattr(domain, "lower") and hasattr(domain, "upper"):
                     return values[0] * (domain.upper - domain.lower) + domain.lower
                 else:
                     return values[0]
@@ -60,7 +68,7 @@ def decode_config(config_space: Dict, encoded_vector: np.array, inv_categorical_
     res = {}
     for k, domain in config_space.items():
         if hasattr(domain, "sample"):
-            length = len(domain) if isinstance(domain, cs.Categorical) else 1
+            length = len(domain) if isinstance(domain, cs.Categorical) and cat_to_onehot else 1
             res[k] = domain.cast(
                 inv_numerize(
                     values=encoded_vector[cur_pos:cur_pos + length],

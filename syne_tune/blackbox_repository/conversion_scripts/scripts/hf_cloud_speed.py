@@ -5,7 +5,7 @@ import numpy as np
 
 from sklearn.neighbors import KNeighborsRegressor
 
-# from benchmarking.blackbox_repository import load, BlackboxOffline, add_surrogate, serialize
+from benchmarking.blackbox_repository import load
 from benchmarking.blackbox_repository.blackbox import Blackbox
 import syne_tune.config_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
@@ -28,6 +28,49 @@ SOURCE_SYNE_TUNE_JOB_NAMES = (
 )
 
 BLACKBOX_NAME = 'hf-cloud-speed'
+
+
+class HFCloudSpeedBlackbox(Blackbox):
+    """
+    Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
+    """
+    def __init__(self, bb):
+        super(HFCloudSpeedBlackbox, self).__init__(
+            configuration_space=bb.configuration_space,
+            fidelity_space=bb.fidelity_space,
+            fidelity_values=bb.fidelity_values,
+            objectives_names=bb.objectives_names,
+        )
+        self.bb = bb
+        # TODO make sure this ref_point makes sense
+        # TODO should I do quantile normalization such that I can set the ref_point=ones(.)
+        self.ref_point = [1., 1.]
+
+        # TODO possibly change this
+        # self.metrics = ['training-runtime-per-sample', 'training-cost-per-sample', 'st-worker-time', 'st-worker-cost']
+        self.metrics = ['training-runtime-per-sample', 'training-cost-per-sample']
+        self.instance_info = InstanceInfos()
+
+    def _objective_function(
+            self,
+            configuration: Dict,
+            fidelity: Optional[Dict] = None,
+            seed: Optional[int] = None
+    ) -> Dict:
+        try:
+            res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
+        except KeyError:
+            res = np.array([[
+                1.,      # 'training-runtime-per-sample'
+                1.,      # 'training-cost-per-sample'
+                6 * 60,  # st_worker_time
+                6 / 60 * self.instance_info(configuration['config_st_instance_type']).cost_per_hour,  # st_tuner_cost
+            ]])
+        return res
+
+    # def hyperparameter_objectives_values(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    #     # TODO somehow avoid redefining it this way and handle this via inheritance?
+    #     return self.bb.hyperparameter_objectives_values()
 
 
 def serialize_hf_cloud_speed():
@@ -68,6 +111,7 @@ def serialize_hf_cloud_speed():
         dfg.config_per_device_train_batch_size.max(),
         dfg.config_dataloader_num_workers.max(),
         dfg.st_worker_time.max(),
+        dfg.st_worker_cost.max(),
     ], axis=1)
     b.columns = ['samples_processed_per_second'] + list(b.columns)[1:]
     # TODO investigate where are the NaNs coming from
@@ -83,6 +127,7 @@ def serialize_hf_cloud_speed():
         {
             'samples_processed_per_second': ['mean'],
             'st_worker_time': ['mean'],
+            'st_worker_cost': ['mean'],
         })
 
     dfrt = c.reset_index()
@@ -107,12 +152,19 @@ def serialize_hf_cloud_speed():
                 df_evaluations=dfrt,
                 configuration_space=configuration_space,
                 fidelity_space={'step': sp.choice([1, ])},
-                fidelity_values={'step': [1, ]},
-                objectives_names=['training-runtime-per-sample', 'training-cost-per-sample'],
+                fidelity_values=[1, ],
+                objectives_names=['training-runtime-per-sample', 'training-cost-per-sample',
+                                  'st_worker_time', 'st_worker_cost', ],
             )
         },
         path=repository_path / BLACKBOX_NAME
     )
+
+
+def import_hf_cloud_speed():
+    bb = load("hf-cloud-speed")
+    bb_dict = {'imdb': HFCloudSpeedBlackbox(bb=bb['imdb'])}
+    return bb_dict
 
 
 def generate_hf_cloud_speed(s3_root: Optional[str] = None):

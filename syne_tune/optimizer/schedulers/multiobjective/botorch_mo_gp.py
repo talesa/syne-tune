@@ -10,6 +10,7 @@
 # on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
+import itertools
 from typing import Dict, Optional, List
 import logging
 
@@ -67,12 +68,11 @@ class BotorchMOGP(TrialScheduler):
             self,
             config_space: Dict,
             metrics: List[str],
+            ref_point: List[float],
             num_init_random_draws: int = 5,
             mode: str = "min",
             points_to_evaluate: Optional[List[Dict]] = None,
             fantasising: bool = True,
-            cat_dims: int = 0,
-            k: int = 0,
     ):
         """
         :param config_space:
@@ -106,14 +106,29 @@ class BotorchMOGP(TrialScheduler):
         }
         self.pending_trials = {}
         self.fantasising = fantasising
-        assert cat_dims in [0, 1], "At the moment, only cat_dims = 0 or 1 is implemented."
-        self.cat_dims = cat_dims
-        self.k = k
-        # TODO set these bounds appropriately from the config_space
-        self.bounds = config_space
 
-        # TODO make sure this ref_point makes sense
-        self.ref_point = [1. for _ in range(len(self.metrics))]
+        self.cat_dims = [i for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
+        self.ks = [len(v) for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
+
+        # Bounded domains (integer and continuous) will be normalized by encode_config(.) function
+        bounds = []
+        for name, domain in self.config_space.items():
+            if isinstance(domain, cs.Categorical):
+                bound = (0, len(domain)-1)
+            elif hasattr(domain, "lower") and hasattr(domain, "upper"):
+                bound = (0., 1.)
+            else:
+                raise Exception(f"Cannot add a bound for parameter: {name} {domain}")
+            bounds.append(bound)
+        self.bounds = torch.Tensor(bounds).T
+        assert (self.bounds.shape[0] == 2), "self.bounds should have shape [2, number_of_hparams]"
+
+        self.fixed_feature_lists = list(
+            map(lambda vs: {self.cat_dims[i]: v for i, v in enumerate(vs)},
+                itertools.product(*[list(range(k)) for k in self.ks]))
+        )
+
+        self.ref_point = ref_point
 
     def on_trial_complete(self, trial: Trial, result: Dict):
         # update available observations with final result.
@@ -121,9 +136,11 @@ class BotorchMOGP(TrialScheduler):
             config=trial.config,
             config_space=self.config_space,
             categorical_maps=self.categorical_maps,
+            cat_to_onehot=False,
+            normalize_bounded_domains=True,
         ))
-        # TODO check the format of this encoded config from above
-        self.y.append(result[self.metric_name])
+
+        self.y.append([result[k] for k in self.metrics])
         self.pending_trials.pop(trial.trial_id)
 
     def _suggest(self, trial_id: int) -> Optional[TrialSuggestion]:
@@ -155,6 +172,7 @@ class BotorchMOGP(TrialScheduler):
             x = self.x
             y = self.y
 
+            # TODO enable fantasizing
             # if self.fantasising:
             #     # when fantasising we draw observations for pending observations according to a unit prior
             #     # TODO sample from the previous posterior instead from a standard normal?
@@ -164,15 +182,18 @@ class BotorchMOGP(TrialScheduler):
             #     ]
             #     y += list(np.random.normal(size=(len(self.pending_trials))))
 
-            # from here making use of botorch utils
-            # TODO make sure these bounds are set correctly from the config space
-            x = normalize(torch.Tensor(x), bounds=self.bounds)
-            y = standardize(torch.Tensor(y).reshape(-1, 1))
+            # From here on we are making use of BOTorch
+
+            # We don't need to normalize x here using BOTorch utils because encode_config takes care of it in
+            #  on_trial_complete(.)
+            # x = normalize(torch.Tensor(x), bounds=self.bounds)
+            x = torch.Tensor(np.array(x))
+            y = standardize(torch.Tensor(y))
 
             MC_SAMPLES = 100
 
-            if self.cat_dims > 0:
-                models = [MixedSingleTaskGP(x, y[:, i:i + 1], cat_dims=[-1]) for i in range(len(self.metrics))]
+            if len(self.cat_dims) > 0:
+                models = [MixedSingleTaskGP(x, y[:, i:i + 1], cat_dims=self.cat_dims) for i in range(len(self.metrics))]
             else:
                 models = [SingleTaskGP(x, y[:, i:i + 1]) for i in range(len(self.metrics))]
             model = ModelListGP(*models)
@@ -182,7 +203,7 @@ class BotorchMOGP(TrialScheduler):
 
             sampler = SobolQMCNormalSampler(num_samples=MC_SAMPLES)
 
-            bounds = torch.stack([x.min(dim=0).values, y.max(dim=0).values])
+            # bounds = torch.stack([x.min(dim=0).values, y.max(dim=0).values])
 
             acq_func = qNoisyExpectedHypervolumeImprovement(
                 model=model,
@@ -194,19 +215,19 @@ class BotorchMOGP(TrialScheduler):
                 maximize=(self.mode == 'max'),
             )
 
-            if self.cat_dims > 0:
+            if len(self.cat_dims) > 0:
                 candidate, acq_value = optimize_acqf_mixed(
                     acq_function=acq_func,
-                    bounds=bounds,
+                    bounds=self.bounds,
                     q=1,
                     num_restarts=20,
-                    fixed_features_list=[{-1: v} for v in range(self.k)],  # x.shape[-1]-1
+                    fixed_features_list=self.fixed_feature_lists,
                     raw_samples=100,
                 )
             else:
                 candidate, acq_value = optimize_acqf(
                     acq_function=acq_func,
-                    bounds=bounds,
+                    bounds=self.bounds,
                     q=1,
                     num_restarts=20,
                     raw_samples=100,
@@ -216,6 +237,8 @@ class BotorchMOGP(TrialScheduler):
                 config_space=self.config_space,
                 encoded_vector=candidate.detach().numpy()[0],
                 inv_categorical_maps=self.inv_categorical_maps,
+                cat_to_onehot=False,
+                normalize_bounded_domains=True,
             )
 
         except NotPSDError as e:
