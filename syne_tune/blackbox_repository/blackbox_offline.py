@@ -8,6 +8,8 @@ from syne_tune.blackbox_repository.blackbox import Blackbox
 from syne_tune.blackbox_repository.serialize import serialize_configspace, deserialize_configspace, serialize_metadata, \
     deserialize_metadata
 
+import syne_tune.config_space as cs
+
 
 class BlackboxOffline(Blackbox):
     def __init__(
@@ -95,9 +97,10 @@ class BlackboxOffline(Blackbox):
             keys = self.index_cols
         output = self.df.xs(tuple(key_dict[col] for col in keys), level=keys).loc[:, self.metric_cols]
         if len(output) == 0:
-            raise ValueError(
-                f"the hyperparameter {configuration} is not present in available evaluations. Use `add_surrogate(blackbox)` if"
-                f" you want to add interpolation or a surrogate model that support querying any configuration."
+            raise KeyError(
+                f"The hyperparameter {configuration} is not present in available evaluations. Use "
+                f"`add_surrogate(blackbox)` if you want to add interpolation or a surrogate model that support querying"
+                f" any configuration."
             )
         if fidelity is not None or self.fidelity_space is None:
             return output.iloc[0].to_dict()
@@ -175,6 +178,15 @@ def deserialize(path: str) -> Union[Dict[str, BlackboxOffline], BlackboxOffline]
 
     assert configuration_space is not None, f"configspace.json could not be found in {path}"
 
+    if len(fidelity_space) > 1:
+        raise Exception("Cannot handle len(fidelity_space) > 1")
+    for k, v in fidelity_space.items():
+        if isinstance(v, cs.Categorical):
+            fidelity_values = v.categories
+        else:
+            raise NotImplementedError(f"The automatic conversion of config_space class {v} to the fidelity_space is not"
+                                      f"implemented yet.")
+
     metadata = deserialize_metadata(path)
     metric_cols = metadata['objectives_names']
     seed_col = metadata['seed_col']
@@ -194,6 +206,7 @@ def deserialize(path: str) -> Union[Dict[str, BlackboxOffline], BlackboxOffline]
             df_evaluations=df,
             configuration_space=configuration_space,
             fidelity_space=fidelity_space,
+            fidelity_values=fidelity_values,
             objectives_names=metric_cols,
             seed_col=seed_col,
         )
