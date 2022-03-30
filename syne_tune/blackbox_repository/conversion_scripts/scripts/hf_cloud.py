@@ -168,8 +168,9 @@ def serialize_hf_cloud():
     # Changing steps to contiguous integers allows us to run multi-fidelity algorithms like ASHA easily.
     df.step = (df.step / 100).astype(np.int64)
 
+    # TODO modify the per_device_train_batch_size to a distribution that can take advantage of BO
     configuration_space = dict(
-        per_device_train_batch_size=sp.choice([2, 4, 8, 12, 16]),
+        per_device_train_batch_size=sp.finrange(4.0, 88.0, 22),  # [4, 8, ..., 88]
         learning_rate=sp.loguniform(1e-7, 1e-4),
         weight_decay=sp.loguniform(1e-6, 1e-2),
     )
