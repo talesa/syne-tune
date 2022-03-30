@@ -18,6 +18,7 @@ from typing import Optional, List
 import os
 
 import boto3
+from sagemaker.estimator import Framework
 from sagemaker.pytorch import PyTorch
 
 from syne_tune.backend.sagemaker_backend.sagemaker_utils import \
@@ -128,9 +129,12 @@ class RemoteLauncher:
 
         # Save entrypoint script and content in a folder to be send by sagemaker.
         # This is required so that the entrypoint is found on Sagemaker.
-        # source_dir = str(self.get_source_dir())
-        # logger.info(f"copy endpoint files from {source_dir} to {upload_dir}")
-        # shutil.copytree(source_dir, upload_dir)
+        if issubclass(type(self.tuner.trial_backend),
+                      syne_tune.backend.sagemaker_backend.sagemaker_backend.SageMakerBackend) \
+                and issubclass(type(self.tuner.trial_backend.sm_estimator), Framework):
+            source_dir = str(self.get_source_dir())
+            logger.info(f"copy endpoint files from {source_dir} to {upload_dir}")
+            shutil.copytree(source_dir, upload_dir)
 
         backup = str(self.tuner.trial_backend.entrypoint_path())
 
@@ -163,7 +167,8 @@ class RemoteLauncher:
             return Path(self.tuner.trial_backend.entrypoint_path()).parent
 
     def is_source_dir_specified(self) -> bool:
-        return hasattr(self.tuner.trial_backend, "source_dir") and self.tuner.trial_backend.sm_estimator.source_dir is not None
+        return hasattr(self.tuner.trial_backend,
+                       "source_dir") and self.tuner.trial_backend.sm_estimator.source_dir is not None
 
     def update_backend_with_remote_paths(self):
         """
@@ -204,7 +209,8 @@ class RemoteLauncher:
         # in case no region is explicitely configured by providing a default region
         environment = self.estimator_kwargs.pop("environment", {})
         if "AWS_DEFAULT_REGION" not in environment:
-          environment["AWS_DEFAULT_REGION"] = boto3.Session().region_name
+            environment["AWS_DEFAULT_REGION"] = boto3.Session().region_name
+
         # the choice of the estimator is arbitrary here since we use a base image of Syne Tune.
         tuner_estimator = PyTorch(
             # path which calls the tuner

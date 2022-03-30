@@ -25,7 +25,7 @@ if __name__ == '__main__':
     blackbox = bb_dict["imdb"]
 
     # simulating HPO
-    n_workers = 2
+    n_workers = 1
 
     elapsed_time_attr = 'st_worker_time'
 
