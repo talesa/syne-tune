@@ -89,6 +89,7 @@ class BotorchMOGP(TrialScheduler):
         super().__init__(config_space)
         assert num_init_random_draws >= 2
         assert mode in ['min', 'max']
+        # TODO make sure this mode actually changes something
         self.mode = mode
         self.metrics = metrics
         self.num_evaluations = 0
@@ -108,7 +109,12 @@ class BotorchMOGP(TrialScheduler):
         self.fantasising = fantasising
 
         self.cat_dims = [i for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
-        self.ks = [len(v) for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
+
+        ks = [len(v) for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
+        self.fixed_feature_lists = list(
+            map(lambda vs: {self.cat_dims[i]: v for i, v in enumerate(vs)},
+                itertools.product(*[list(range(k)) for k in ks]))
+        )
 
         # Bounded domains (integer and continuous) will be normalized by encode_config(.) function
         bounds = []
@@ -120,15 +126,24 @@ class BotorchMOGP(TrialScheduler):
             else:
                 raise Exception(f"Cannot add a bound for parameter: {name} {domain}")
             bounds.append(bound)
-        self.bounds = torch.Tensor(bounds).T
+        self.bounds = torch.Tensor(bounds).to(dtype=torch.double).T
         assert (self.bounds.shape[0] == 2), "self.bounds should have shape [2, number_of_hparams]"
 
-        self.fixed_feature_lists = list(
-            map(lambda vs: {self.cat_dims[i]: v for i, v in enumerate(vs)},
-                itertools.product(*[list(range(k)) for k in self.ks]))
-        )
+        # BOTorch assumes minimization so we negate the ref_point
+        self.ref_point = [-v for v in ref_point]
 
-        self.ref_point = ref_point
+        all_possible_configs = set(tuple(v.sample() for v in self.config_space.values()) for _ in range(10000))
+        all_configs_dicts = [{k: v for k, v in zip(self.config_space.keys(), config)} for config in all_possible_configs]
+        self.all_configs_vector = {
+            tuple(encode_config(
+                config=config,
+                config_space=self.config_space,
+                categorical_maps=self.categorical_maps,
+                cat_to_onehot=False,
+                normalize_bounded_domains=True,
+            ))
+            for config in all_configs_dicts}
+        # self.all_configs_tensor = torch.Tensor(np.stack(all_configs_vector).reshape(-1, 1, 3))
 
     def on_trial_complete(self, trial: Trial, result: Dict):
         # update available observations with final result.
@@ -186,9 +201,10 @@ class BotorchMOGP(TrialScheduler):
 
             # We don't need to normalize x here using BOTorch utils because encode_config takes care of it in
             #  on_trial_complete(.)
-            # x = normalize(torch.Tensor(x), bounds=self.bounds)
-            x = torch.Tensor(np.array(x))
-            y = standardize(torch.Tensor(y))
+            # x = normalize(torch.Tensor(x).to(dtype=torch.double), bounds=self.bounds)
+            x = torch.Tensor(np.array(x)).to(dtype=torch.double)
+            # BOTorch assumes maximization while we want to minimize so we negate the y tensor
+            y = standardize(-torch.Tensor(y).to(dtype=torch.double))
 
             MC_SAMPLES = 100
 
@@ -203,8 +219,6 @@ class BotorchMOGP(TrialScheduler):
 
             sampler = SobolQMCNormalSampler(num_samples=MC_SAMPLES)
 
-            # bounds = torch.stack([x.min(dim=0).values, y.max(dim=0).values])
-
             acq_func = qNoisyExpectedHypervolumeImprovement(
                 model=model,
                 ref_point=self.ref_point,
@@ -212,30 +226,37 @@ class BotorchMOGP(TrialScheduler):
                 prune_baseline=True,
                 # prune baseline points that have estimated zero probability of being Pareto optimal
                 sampler=sampler,
-                maximize=(self.mode == 'max'),
+                # maximize=(self.mode == 'max'),
             )
 
-            if len(self.cat_dims) > 0:
-                candidate, acq_value = optimize_acqf_mixed(
-                    acq_function=acq_func,
-                    bounds=self.bounds,
-                    q=1,
-                    num_restarts=20,
-                    fixed_features_list=self.fixed_feature_lists,
-                    raw_samples=100,
-                )
-            else:
-                candidate, acq_value = optimize_acqf(
-                    acq_function=acq_func,
-                    bounds=self.bounds,
-                    q=1,
-                    num_restarts=20,
-                    raw_samples=100,
-                )
+            xs_to_consider = list(self.all_configs_vector.difference(set(tuple(v) for v in self.x)))
+            idxmax = acq_func(torch.Tensor(np.stack(xs_to_consider).reshape(-1, 1, 3))).argmax()
+
+            candidate = np.array(xs_to_consider[idxmax])
+
+            # if len(self.cat_dims) > 0:
+            #     candidate, acq_value = optimize_acqf_mixed(
+            #         acq_function=acq_func,
+            #         bounds=self.bounds,
+            #         q=1,
+            #         num_restarts=20,
+            #         fixed_features_list=self.fixed_feature_lists,
+            #         raw_samples=100,
+            #     )
+            #     candidate = candidate.detach().numpy()[0]
+            # else:
+            #     candidate, acq_value = optimize_acqf(
+            #         acq_function=acq_func,
+            #         bounds=self.bounds,
+            #         q=1,
+            #         num_restarts=20,
+            #         raw_samples=100,
+            #     )
+            #     candidate = candidate.detach().numpy()[0]
 
             return decode_config(
                 config_space=self.config_space,
-                encoded_vector=candidate.detach().numpy()[0],
+                encoded_vector=candidate,
                 inv_categorical_maps=self.inv_categorical_maps,
                 cat_to_onehot=False,
                 normalize_bounded_domains=True,

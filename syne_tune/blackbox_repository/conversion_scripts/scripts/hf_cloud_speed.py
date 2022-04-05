@@ -5,7 +5,7 @@ import numpy as np
 
 from sklearn.neighbors import KNeighborsRegressor
 
-from benchmarking.blackbox_repository import load
+from benchmarking.blackbox_repository import load, add_surrogate
 from benchmarking.blackbox_repository.blackbox import Blackbox
 import syne_tune.config_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
@@ -17,18 +17,19 @@ import syne_tune.experiments
 
 SOURCE_SYNE_TUNE_JOB_NAMES = (
     'speed-bs-it-nw-new-2022-02-21-18-05-01-921',  # big sweep
-    'speed-bs-it-nw-new-2022-02-28-13-37-54-540',  # ml.g5.xlarge, bs=48, num_data_workers>1
-    'speed-bs-it-nw-new-2022-02-28-14-43-39-336',  # ml.g5.12xlarge, bs=48 num_data_workers>1
-    'speed-bs-it-nw-g5xlarge-bs52-2022-03-11-14-41-19-715',  # ml.g5.xlarge, bs=52, num_data_workers=0,1,2
-    'speed-bs-it-nw-p3-16-2022-03-10-22-49-26-353',  # ml.p3.16xlarge
-    'speed-bs-it-nw-g5-48-2022-03-11-10-05-28-531',  # ml.g5.48xlarge
-    'speed-bs-it-nw-p3dn-24-2022-03-11-09-52-19-358',  # ml.p3dn.24xlarge
-    'speed-bs-it-nw-p4d-24-2022-03-11-12-54-38-398',  # ml.p4d.24xlarge
-    'speed-bs-it-nw-g5Xxlarge-bs52-2022-03-11-15-02-39-559',  # ml.g5.*xlarge, bs=52
+    # 'speed-bs-it-nw-new-2022-02-28-13-37-54-540',  # ml.g5.xlarge, bs=48, num_data_workers>1
+    # 'speed-bs-it-nw-new-2022-02-28-14-43-39-336',  # ml.g5.12xlarge, bs=48 num_data_workers>1
+    # 'speed-bs-it-nw-g5xlarge-bs52-2022-03-11-14-41-19-715',  # ml.g5.xlarge, bs=52, num_data_workers=0,1,2
+    # 'speed-bs-it-nw-p3-16-2022-03-10-22-49-26-353',  # ml.p3.16xlarge
+    # 'speed-bs-it-nw-g5-48-2022-03-11-10-05-28-531',  # ml.g5.48xlarge
+    # 'speed-bs-it-nw-p3dn-24-2022-03-11-09-52-19-358',  # ml.p3dn.24xlarge
+    # 'speed-bs-it-nw-p4d-24-2022-03-11-12-54-38-398',  # ml.p4d.24xlarge
+    # 'speed-bs-it-nw-g5Xxlarge-bs52-2022-03-11-15-02-39-559',  # ml.g5.*xlarge, bs=52
 )
 
 BLACKBOX_NAME = 'hf-cloud-speed'
 
+STARTUP_OVERHEAD_TIME = 6 * 60  # 6min
 
 class HFCloudSpeedBlackbox(Blackbox):
     """
@@ -41,9 +42,9 @@ class HFCloudSpeedBlackbox(Blackbox):
             fidelity_values=bb.fidelity_values,
             objectives_names=bb.objectives_names,
         )
-        self.bb = bb
+        self.bb = add_surrogate(bb, surrogate=KNeighborsRegressor(n_neighbors=2, weights='distance'))
+                                # hps_to_exclude=('instance_type',))
         # TODO make sure this ref_point makes sense
-        # TODO should I do quantile normalization such that I can set the ref_point=ones(.)
         self.ref_point = [1., 1.]
 
         # TODO possibly change this
@@ -51,21 +52,49 @@ class HFCloudSpeedBlackbox(Blackbox):
         self.metrics = ['training-runtime-per-sample', 'training-cost-per-sample']
         self.instance_info = InstanceInfos()
 
+        #       GPU  RAM max_bs_imdb
+        # g4dn T4   16GB          32
+        # g5   A10G 24GB          52
+        # p2   K80  12GB          24
+        # p3   V100 16GB          32
+        # p3dn V100 32GB          68
+        # p4d  A100 40GB          88
+
+        self.per_device_train_batch_size_limits = {
+            'g4dn': 32,
+            'g5':   52,
+            'p2':   24,
+            'p3':   32,
+            'p3dn': 68,
+            'p4d':  88,
+        }
+
     def _objective_function(
             self,
             configuration: Dict,
             fidelity: Optional[Dict] = None,
             seed: Optional[int] = None
     ) -> Dict:
-        try:
-            res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
-        except KeyError:
-            res = np.array([[
-                1.,      # 'training-runtime-per-sample'
-                1.,      # 'training-cost-per-sample'
-                6 * 60,  # st_worker_time
-                6 / 60 * self.instance_info(configuration['config_st_instance_type']).cost_per_hour,  # st_tuner_cost
-            ]])
+        failed_attempt = np.array([[
+            1.,  # training-runtime-per-sample
+            1.,  # training-cost-per-sample
+            STARTUP_OVERHEAD_TIME,  # st_worker_time
+            (STARTUP_OVERHEAD_TIME / 60. / 60. *
+             self.instance_info(configuration['config_st_instance_type']).cost_per_hour),  # st_tuner_cost
+        ]])
+
+        if self.per_device_train_batch_size_limits[configuration['config_st_instance_type'].split('.')[1]] < \
+                configuration['config_per_device_train_batch_size']:
+            return failed_attempt
+
+        res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
+
+        # Accounting for the fact that Syne Tune recorded numbers that constitute the benchmark do not account for the
+        # startup overhead time
+        res[:, 2] = res[:, 2] + STARTUP_OVERHEAD_TIME
+        res[:, 3] = res[:, 3] + (STARTUP_OVERHEAD_TIME / 60. / 60. *
+             self.instance_info(configuration['config_st_instance_type']).cost_per_hour)
+
         return res
 
     # def hyperparameter_objectives_values(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -74,8 +103,6 @@ class HFCloudSpeedBlackbox(Blackbox):
 
 
 def serialize_hf_cloud_speed():
-    # TODO account for the failed attempts
-
     dfs_to_concat = list()
     trial_id_max = -1
     for tuner_job_name in SOURCE_SYNE_TUNE_JOB_NAMES:
@@ -117,6 +144,7 @@ def serialize_hf_cloud_speed():
     # TODO investigate where are the NaNs coming from
     #  - probably some of the runs not having the measurement for at least two steps - having too large batch size to
     #    record 200.
+    #  - do I have NaNs also in the notebook?
 
     b = b.dropna(subset=['samples_processed_per_second'], how='all')
 
@@ -142,8 +170,11 @@ def serialize_hf_cloud_speed():
 
     configuration_space = dict(
         config_st_instance_type=sp.choice(dfrt.config_st_instance_type.unique().tolist()),
-        config_per_device_train_batch_size=sp.finrange(4.0, 88.0, 22),  # [4, 8, ..., 88]
-        config_dataloader_num_workers=sp.finrange(0, 2, 3),  # [0, 1, 2]
+        # config_per_device_train_batch_size=sp.finrange(8.0, 56.0, 7),  # {8.0, 16.0, 24.0, 32.0, 40.0, 48.0}
+        config_per_device_train_batch_size=sp.finrange(8.0, 48.0, 6),  # {8.0, 16.0, 24.0, 32.0, 40.0, 48.0}
+        config_dataloader_num_workers=sp.finrange(0, 1, 2),  # [0, 1]
+        # config_per_device_train_batch_size=sp.finrange(4.0, 88.0, 22),  # [4, 8, ..., 88]
+        # config_dataloader_num_workers=sp.finrange(0, 2, 3),  # [0, 1, 2]
     )
 
     serialize(
