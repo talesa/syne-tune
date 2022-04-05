@@ -25,15 +25,6 @@ if __name__ == '__main__':
     bb_dict = import_hf_cloud()
     blackbox = bb_dict["imdb"]
 
-    # config = {
-    #     'per_device_train_batch_size': 10,
-    #     'weight_decay': 0.0001,
-    #     'learning_rate': 0.000003,
-    # }
-    # for instance_type in ['ml.g5.xlarge', 'ml.g4dn.8xlarge']:
-    #     config['instance_type'] = instance_type
-    #     print(f"performance for {instance_type}: {blackbox(configuration=config, fidelity=199, seed=0)}")
-
     # simulating HPO
     n_workers = 1
     metric = "metric_training_loss"
