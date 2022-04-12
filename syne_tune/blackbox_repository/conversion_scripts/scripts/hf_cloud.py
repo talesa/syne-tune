@@ -5,13 +5,13 @@ import numpy as np
 
 from sklearn.neighbors import KNeighborsRegressor
 
-from benchmarking.blackbox_repository import load, BlackboxOffline, add_surrogate, serialize
-from benchmarking.blackbox_repository.blackbox import Blackbox
+from syne_tune.blackbox_repository import load, BlackboxOffline, add_surrogate, serialize
+from syne_tune.blackbox_repository.blackbox import Blackbox
 import syne_tune.config_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.util import s3_experiment_path
-from benchmarking.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
-from benchmarking.blackbox_repository.conversion_scripts.utils import repository_path, upload
+from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
+from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
 import syne_tune.experiments
 
 

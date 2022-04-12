@@ -4,8 +4,8 @@ Dataset generated using examples/launch_huggingface_sweep_ag.py
 from typing import Optional
 import pandas as pd
 import numpy as np
-from benchmarking.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
-from benchmarking.blackbox_repository.conversion_scripts.utils import repository_path, upload
+from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
+from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
 import syne_tune.search_space as sp
 import syne_tune.experiments
 
