@@ -11,18 +11,21 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 import itertools
-from typing import Dict, Optional, List
+from collections import defaultdict
+from typing import Dict, Optional, List, Union, Iterable
 import logging
 
 import numpy as np
 import torch
-from botorch.models import SingleTaskGP
+from botorch.models import SingleTaskGP, ModelList
 from botorch.fit import fit_gpytorch_model
 from botorch.utils import standardize
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from botorch.acquisition import UpperConfidenceBound
 from botorch.optim import optimize_acqf
 from gpytorch.utils.errors import NotPSDError
+
+from botorch.posteriors import Posterior
 
 from botorch.models.gp_regression import FixedNoiseGP
 from botorch.models.model_list_gp_regression import ModelListGP
@@ -43,7 +46,8 @@ from botorch.optim.optimize import optimize_acqf, optimize_acqf_list, optimize_a
 from botorch.acquisition.objective import GenericMCObjective
 from botorch.utils.multi_objective.scalarization import get_chebyshev_scalarization
 from botorch.utils.multi_objective.box_decompositions.non_dominated import FastNondominatedPartitioning
-from botorch.acquisition.multi_objective.monte_carlo import qExpectedHypervolumeImprovement, qNoisyExpectedHypervolumeImprovement
+from botorch.acquisition.multi_objective.monte_carlo import qExpectedHypervolumeImprovement, \
+    qNoisyExpectedHypervolumeImprovement
 
 from botorch import fit_gpytorch_model
 from botorch.sampling.samplers import SobolQMCNormalSampler
@@ -51,6 +55,7 @@ from botorch.exceptions import BadInitialCandidatesWarning
 from botorch.utils.multi_objective.pareto import is_non_dominated
 from botorch.utils.multi_objective.box_decompositions.dominated import DominatedPartitioning
 
+from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.optimizer.scheduler import TrialScheduler, TrialSuggestion
 from syne_tune.backend.trial_status import Trial
 import syne_tune.config_space as cs
@@ -72,7 +77,9 @@ class BotorchMOGP(TrialScheduler):
             num_init_random_draws: int = 5,
             mode: str = "min",
             points_to_evaluate: Optional[List[Dict]] = None,
-            fantasising: bool = True,
+            # fantasising: bool = True,
+            num_mc_samples: int = 100,
+            instance_type_features: Iterable = tuple(),
     ):
         """
         :param config_space:
@@ -88,9 +95,13 @@ class BotorchMOGP(TrialScheduler):
         """
         super().__init__(config_space)
         assert num_init_random_draws >= 2
+
         assert mode in ['min', 'max']
-        # TODO make sure this mode actually changes something
         self.mode = mode
+        # BOTorch assumes minimization so we negate the ref_point
+        if self.mode == 'min':
+            self.ref_point = [-v for v in ref_point]
+
         self.metrics = metrics
         self.num_evaluations = 0
         self.num_minimum_observations = num_init_random_draws
@@ -106,53 +117,73 @@ class BotorchMOGP(TrialScheduler):
             hp: dict(zip(map.values(), map.keys())) for hp, map in self.categorical_maps.items()
         }
         self.pending_trials = {}
-        self.fantasising = fantasising
+        # self.fantasising = fantasising
+        self.num_mc_samples = num_mc_samples
 
         self.cat_dims = [i for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
 
-        ks = [len(v) for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
-        self.fixed_feature_lists = list(
-            map(lambda vs: {self.cat_dims[i]: v for i, v in enumerate(vs)},
-                itertools.product(*[list(range(k)) for k in ks]))
-        )
+        # Additional per-instance_type features
+        for v in instance_type_features:
+            assert v in ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu')
+        self.instance_type_features = instance_type_features
 
-        # Bounded domains (integer and continuous) will be normalized by encode_config(.) function
+        instance_info = InstanceInfos()
+        self.instance_type_to_tuple_features_dict = {}
+        per_feature_values = defaultdict(list)
+        for instance_type in self.config_space['config_st_instance_type']:
+            record = []
+            for k in self.instance_type_features:
+                fields = k.split('*')
+                value = np.prod(tuple(instance_info(instance_type).__dict__[f] for f in fields))
+                record.append(value)
+                per_feature_values[k].append(value)
+            self.instance_type_to_tuple_features_dict[instance_type] = tuple(record)
+
         bounds = []
+        # bounds for the self.config_space variables
         for name, domain in self.config_space.items():
+            # We are treating config_st_instance_type as a categorical in the BOTorch framework, it should not be
+            # normalized so need to set its bounds to [0, 1].
             if isinstance(domain, cs.Categorical):
-                bound = (0, len(domain)-1)
-            elif hasattr(domain, "lower") and hasattr(domain, "upper"):
                 bound = (0., 1.)
+            # for domains with attributes lower and upper, they define the bounds
+            elif hasattr(domain, "lower") and hasattr(domain, "upper"):
+                bound = (domain.lower, domain.upper)
             else:
                 raise Exception(f"Cannot add a bound for parameter: {name} {domain}")
             bounds.append(bound)
-        self.bounds = torch.Tensor(bounds).to(dtype=torch.double).T
+        # bounds for per-instance_type features
+        for k in self.instance_type_features:
+            bounds.append((min(per_feature_values[k]), max(per_feature_values[k])))
+        self.bounds = torch.DoubleTensor(bounds).to(dtype=torch.double).T
         assert (self.bounds.shape[0] == 2), "self.bounds should have shape [2, number_of_hparams]"
 
-        # BOTorch assumes minimization so we negate the ref_point
-        self.ref_point = [-v for v in ref_point]
+        self.field_to_id = {k: i for i, k in enumerate(self.config_space.keys())}
 
+        # TODO how to generate all values from a discrete hp config like finrange?
+        #  Then we could use itertools.product rather than sampling which is very silly
         all_possible_configs = set(tuple(v.sample() for v in self.config_space.values()) for _ in range(10000))
-        all_configs_dicts = [{k: v for k, v in zip(self.config_space.keys(), config)} for config in all_possible_configs]
+        all_configs_dicts = [{k: v for k, v in zip(self.config_space.keys(), config)} for config in
+                             all_possible_configs]
         self.all_configs_vector = {
             tuple(encode_config(
                 config=config,
                 config_space=self.config_space,
                 categorical_maps=self.categorical_maps,
                 cat_to_onehot=False,
-                normalize_bounded_domains=True,
+                normalize_bounded_domains=False,
             ))
             for config in all_configs_dicts}
-        # self.all_configs_tensor = torch.Tensor(np.stack(all_configs_vector).reshape(-1, 1, 3))
 
     def on_trial_complete(self, trial: Trial, result: Dict):
-        # update available observations with final result.
+        # update available observations with final result
+        # store them in the unnormalized form of only the variables available in the self.config_space
         self.x.append(encode_config(
             config=trial.config,
             config_space=self.config_space,
             categorical_maps=self.categorical_maps,
             cat_to_onehot=False,
-            normalize_bounded_domains=True,
+            normalize_bounded_domains=False,
         ))
 
         self.y.append([result[k] for k in self.metrics])
@@ -175,91 +206,96 @@ class BotorchMOGP(TrialScheduler):
         return TrialSuggestion.start_suggestion(config=suggestion)
 
     def sample_random(self) -> Dict:
-        return {
+        sample = {
             k: v.sample()
             if isinstance(v, cs.Domain) else v
             for k, v in self.config_space.items()
         }
+        sample_encoded = encode_config(
+            config=sample,
+            config_space=self.config_space,
+            categorical_maps=self.categorical_maps,
+            cat_to_onehot=False,
+            normalize_bounded_domains=False,
+        )
+        if sample_encoded not in self.x:
+            return sample
+        else:
+            return self.sample_random()
 
-    def sample_gp(self) -> Dict:
+    def append_instance_type_features(self, x):
+        instance_type_feature_vector = list()
+        for v in x:
+            instance_type_field = int(v[self.field_to_id['config_st_instance_type']])
+            instance_type_string = self.inv_categorical_maps['config_st_instance_type'][instance_type_field]
+            instance_type_feature_vector.append(self.instance_type_to_tuple_features_dict[instance_type_string])
+        instance_type_feature_tensor = torch.DoubleTensor(instance_type_feature_vector)
+
+        output = torch.cat([torch.DoubleTensor(np.stack(x, axis=0)), instance_type_feature_tensor], dim=1)
+        return output
+
+    def sample_gp(self) -> Union[dict, None]:
         try:
-            # First updates GP and compute its posterior, then maximum acquisition function to find candidate.
-            x = self.x
-            y = self.y
+            x_unnorm = self.append_instance_type_features(self.x)
+            x_norm = normalize(x_unnorm, bounds=self.bounds)
 
-            # TODO enable fantasizing
-            # if self.fantasising:
-            #     # when fantasising we draw observations for pending observations according to a unit prior
-            #     # TODO sample from the previous posterior instead from a standard normal?
-            #     x += [
-            #         encode_config(config=config, config_space=self.config_space, categorical_maps=self.categorical_maps)
-            #         for config in self.pending_trials.values()
-            #     ]
-            #     y += list(np.random.normal(size=(len(self.pending_trials))))
-
-            # From here on we are making use of BOTorch
-
-            # We don't need to normalize x here using BOTorch utils because encode_config takes care of it in
-            #  on_trial_complete(.)
-            # x = normalize(torch.Tensor(x).to(dtype=torch.double), bounds=self.bounds)
-            x = torch.Tensor(np.array(x)).to(dtype=torch.double)
-            # BOTorch assumes maximization while we want to minimize so we negate the y tensor
-            y = standardize(-torch.Tensor(y).to(dtype=torch.double))
-
-            MC_SAMPLES = 100
+            y = standardize(torch.DoubleTensor(self.y))
+            if self.mode == 'min':
+                # BOTorch assumes maximization while we want to minimize so we negate the y tensor
+                y = -y
 
             if len(self.cat_dims) > 0:
-                models = [MixedSingleTaskGP(x, y[:, i:i + 1], cat_dims=self.cat_dims) for i in range(len(self.metrics))]
+                models = [MixedSingleTaskGP(x_norm, y[:, i:i + 1], cat_dims=self.cat_dims) for i in range(len(self.metrics))]
             else:
-                models = [SingleTaskGP(x, y[:, i:i + 1]) for i in range(len(self.metrics))]
+                models = [SingleTaskGP(x_norm, y[:, i:i + 1]) for i in range(len(self.metrics))]
             model = ModelListGP(*models)
 
             mll = SumMarginalLogLikelihood(model.likelihood, model)
             fit_gpytorch_model(mll)
 
-            sampler = SobolQMCNormalSampler(num_samples=MC_SAMPLES)
+            sampler = SobolQMCNormalSampler(num_samples=self.num_mc_samples)
 
             acq_func = qNoisyExpectedHypervolumeImprovement(
                 model=model,
                 ref_point=self.ref_point,
-                X_baseline=x,
+                X_baseline=x_norm,
                 prune_baseline=True,
-                # prune baseline points that have estimated zero probability of being Pareto optimal
                 sampler=sampler,
-                # maximize=(self.mode == 'max'),
             )
 
-            xs_to_consider = list(self.all_configs_vector.difference(set(tuple(v) for v in self.x)))
-            idxmax = acq_func(torch.Tensor(np.stack(xs_to_consider).reshape(-1, 1, 3))).argmax()
+            # compute all of the points in the config_space still left to consider
+            x_to_consider_unnorm = tuple(self.all_configs_vector.difference(set(self.x)))
+            if len(x_to_consider_unnorm) == 0:
+                # No more points in the config space to consider, the end of the optimization
+                return None
+            if not (len(x_to_consider_unnorm) + len(self.x) == len(self.all_configs_vector)):
+                print('self.all_configs_vector')
+                print(self.all_configs_vector)
+                print(f'x_to_consider')
+                print(x_to_consider_unnorm)
+                print(f'self.x')
+                print(self.x)
+                print(f'len(x_to_consider)={len(x_to_consider_unnorm)}')
+                print(f'len(self.x)={len(self.x)}')
+                print(f'len(self.all_configs_vector)={len(self.all_configs_vector)}')
+                raise Exception('Value has not been removed from self.all_configs_vector correctly.')
 
-            candidate = np.array(xs_to_consider[idxmax])
-
-            # if len(self.cat_dims) > 0:
-            #     candidate, acq_value = optimize_acqf_mixed(
-            #         acq_function=acq_func,
-            #         bounds=self.bounds,
-            #         q=1,
-            #         num_restarts=20,
-            #         fixed_features_list=self.fixed_feature_lists,
-            #         raw_samples=100,
-            #     )
-            #     candidate = candidate.detach().numpy()[0]
-            # else:
-            #     candidate, acq_value = optimize_acqf(
-            #         acq_function=acq_func,
-            #         bounds=self.bounds,
-            #         q=1,
-            #         num_restarts=20,
-            #         raw_samples=100,
-            #     )
-            #     candidate = candidate.detach().numpy()[0]
+            x_to_consider_unnorm = self.append_instance_type_features(x_to_consider_unnorm)
+            x_to_consider_norm = normalize(x_to_consider_unnorm, self.bounds)
+            # batch_shape below required to compute the acquisition function over different possible points rather than
+            # all of those points jointly
+            acq_func_values = acq_func(x_to_consider_norm.reshape(-1, 1, x_to_consider_norm.shape[-1]))
+            acq_func_idxmax = acq_func_values.argmax()
+            candidate = np.array(x_to_consider_unnorm[acq_func_idxmax], dtype=np.double)
+            # take only the fields contained in self.config_space
+            candidate = candidate[:len(x_to_consider_unnorm[0]) - len(self.instance_type_features)]
 
             return decode_config(
                 config_space=self.config_space,
                 encoded_vector=candidate,
                 inv_categorical_maps=self.inv_categorical_maps,
                 cat_to_onehot=False,
-                normalize_bounded_domains=True,
+                normalize_bounded_domains=False,
             )
 
         except NotPSDError as e:

@@ -23,6 +23,7 @@ class InstanceInfo:
     num_cpu: int
     num_gpu: int
     cost_per_hour: float
+    GPUFP32TFLOPS: float
 
 
 class InstanceInfos:
@@ -44,6 +45,7 @@ class InstanceInfos:
             num_cpu=row['vCPU'].values[0],
             num_gpu=row['GPU'].values[0],
             cost_per_hour=row['price'].values[0],
+            GPUFP32TFLOPS=row['GPUFP32TFLOPS'].values[0],
         )
 
 def select_instance_type(

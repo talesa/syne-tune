@@ -17,22 +17,22 @@ def encode_config(config_space: Dict, config: Dict, categorical_maps: Dict,
     def numerize(value, domain, categorical_map):
         if isinstance(domain, cs.Categorical):
             if cat_to_onehot:
-                res = np.zeros(len(domain))
+                res = np.zeros(len(domain), dtype=np.double)
                 res[categorical_map[value]] = 1
             else:
                 res = categorical_map[value]
             return res
         else:
             if normalize_bounded_domains and hasattr(domain, "lower") and hasattr(domain, "upper"):
-                return [(value - domain.lower) / (domain.upper - domain.lower)]
+                return (value - domain.lower) / (domain.upper - domain.lower)
             else:
-                return [value]
+                return value
 
-    return np.hstack([
+    return tuple(
         numerize(value=config[k], domain=v, categorical_map=categorical_maps.get(k, {}))
         for k, v in config_space.items()
         if isinstance(v, cs.Domain)
-    ])
+    )
 
 
 def decode_config(config_space: Dict, encoded_vector: np.array, inv_categorical_maps: Dict,

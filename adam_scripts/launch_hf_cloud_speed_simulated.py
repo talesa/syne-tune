@@ -34,7 +34,13 @@ if __name__ == '__main__':
 
     elapsed_time_attr = 'st_worker_time'
 
+    # ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu')
+    # instance_type_features = ('GPUFP32TFLOPS*num_gpu', 'cost_per_hour')
+    instance_type_features = ('GPUFP32TFLOPS',)
+    # instance_type_features = []
+
     temp = []
+    # try:
     for i in tqdm.trange(100):
         backend = UserBlackboxBackend(
             blackbox=blackbox,
@@ -42,13 +48,14 @@ if __name__ == '__main__':
         )
 
         scheduler = BotorchMOGP(
-            config_space=backend.blackbox.configuration_space,
+            config_space=blackbox.configuration_space,
             mode='min',
             metrics=blackbox.metrics,
             ref_point=blackbox.ref_point,
+            instance_type_features=instance_type_features if len(instance_type_features) > 0 else tuple(),
         )
 
-        stop_criterion = StoppingCriterion(max_cost=90.)
+        stop_criterion = StoppingCriterion(max_cost=50.)
 
         # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
         tuner = Tuner(
@@ -65,7 +72,12 @@ if __name__ == '__main__':
         )
         tuner.run()
         temp.append(tuner.name)
+    # except AssertionError as e:
+    #     print(e)
+    #     print(temp)
+    #     print(tuner.name)
 
+    print(tuner.name)
     print(temp)
 
     # tuner_job_name = 'test-hf-cloud-speed-remotelauncher'
