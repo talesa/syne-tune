@@ -71,7 +71,6 @@ class BlackboxSurrogate(Blackbox):
         self.name = name
         self.fidelity_values = fidelity_values
         self.hps_to_exclude = hps_to_exclude
-        self.fit_surrogate(surrogate)
 
     # @property
     # def fidelity_values(self) -> np.array:
