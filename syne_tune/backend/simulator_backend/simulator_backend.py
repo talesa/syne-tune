@@ -133,7 +133,7 @@ class SimulatorBackend(LocalBackend):
         self._simulator_state = SimulatorState()
         self._time_keeper = SimulatedTimeKeeper()
         self._next_results_to_fetch = dict()
-        logger.setLevel(logging.INFO)  # Suppress DEBUG for this class
+        # logger.setLevel(logging.INFO)  # Suppress DEBUG for this class
 
     @property
     def time_keeper(self) -> SimulatedTimeKeeper:

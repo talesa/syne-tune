@@ -43,9 +43,7 @@ class HFCloudBlackbox(Blackbox):
             fidelity_values=bb.fidelity_values,
             objectives_names=self.objectives_names,
         )
-        self.bb = add_surrogate(bb,
-                                surrogate=KNeighborsRegressor(n_neighbors=3),
-                                hps_to_exclude=('instance_type',))
+        self.bb = add_surrogate(bb, surrogate=KNeighborsRegressor(n_neighbors=3),)
 
         assert len(bb.df.config_st_instance_type.unique()) == 1, \
             "All of the trials should have been performed on the same instance type."

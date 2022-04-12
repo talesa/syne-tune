@@ -37,8 +37,8 @@ if __name__ == '__main__':
     config_space = {
         "lr": loguniform(1e-4, 1e-1),
         "epochs": epochs,
-        "num_cells": lograndint(lower=1, upper=80),
-        "num_layers": lograndint(lower=1, upper=10),
+        "num_cells": lograndint(lower=1, upper=200),
+        "num_layers": lograndint(lower=1, upper=4),
         "dataset": "electricity"
         # "dataset": "m4_hourly"
     }

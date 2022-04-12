@@ -269,15 +269,6 @@ class BotorchMOGP(TrialScheduler):
                 # No more points in the config space to consider, the end of the optimization
                 return None
             if not (len(x_to_consider_unnorm) + len(self.x) == len(self.all_configs_vector)):
-                print('self.all_configs_vector')
-                print(self.all_configs_vector)
-                print(f'x_to_consider')
-                print(x_to_consider_unnorm)
-                print(f'self.x')
-                print(self.x)
-                print(f'len(x_to_consider)={len(x_to_consider_unnorm)}')
-                print(f'len(self.x)={len(self.x)}')
-                print(f'len(self.all_configs_vector)={len(self.all_configs_vector)}')
                 raise Exception('Value has not been removed from self.all_configs_vector correctly.')
 
             x_to_consider_unnorm = self.append_instance_type_features(x_to_consider_unnorm)
