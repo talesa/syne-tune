@@ -1,19 +1,10 @@
 import logging
-from pathlib import Path
 
-import numpy as np
-import pandas as pd
-import syne_tune.config_space as sp
-
-from syne_tune.blackbox_repository import load, add_surrogate
-from syne_tune.blackbox_repository.blackbox_tabular import BlackboxTabular
 from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_cloud_speed import import_hf_cloud_speed
-from syne_tune.blackbox_repository.simulated_tabular_backend import BlackboxRepositoryBackend, UserBlackboxBackend
+from syne_tune.blackbox_repository.simulated_tabular_backend import UserBlackboxBackend
 
 from syne_tune.backend.simulator_backend.simulator_callback import SimulatorCallback
-from syne_tune.optimizer.baselines import ASHA, RandomSearch
 from syne_tune.optimizer.schedulers.multiobjective.botorch_mo_gp import BotorchMOGP
-from syne_tune.remote.remote_launcher import RemoteLauncher
 from syne_tune.stopping_criterion import StoppingCriterion
 from syne_tune.tuner import Tuner
 
@@ -21,8 +12,17 @@ import tqdm
 
 import syne_tune.experiments
 
+import sagemaker
+import boto3
+
+from syne_tune.util import s3_experiment_path
 
 if __name__ == '__main__':
+    # boto3.setup_default_session(region_name='us-west-2')
+    # tuner_name = 'simulated-tabular-backend-2022-04-11-17-33-57-906'
+    # print(f's3_experiment_path(tuner_name=tuner_name): {s3_experiment_path(tuner_name=tuner_name)}')
+    # print(syne_tune.experiments.load_experiment(tuner_name=tuner_name))
+
     logging.getLogger().setLevel(logging.CRITICAL)
 
     # loading data and querying stuff
@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
     temp = []
     # try:
-    for i in tqdm.trange(100):
+    for i in tqdm.trange(10):
         backend = UserBlackboxBackend(
             blackbox=blackbox,
             elapsed_time_attr=elapsed_time_attr,
@@ -51,8 +51,9 @@ if __name__ == '__main__':
             config_space=blackbox.configuration_space,
             mode='min',
             metrics=blackbox.metrics,
-            ref_point=blackbox.ref_point,
+            ref_point=[5., 5.],
             instance_type_features=instance_type_features if len(instance_type_features) > 0 else tuple(),
+            deterministic_transform=False,
         )
 
         stop_criterion = StoppingCriterion(max_cost=50.)
@@ -92,4 +93,3 @@ if __name__ == '__main__':
     # remote_launcher.run(wait=False)
     #
     # print(f"dfff = syne_tune.experiments.load_experiment('{tuner.name}')")
-

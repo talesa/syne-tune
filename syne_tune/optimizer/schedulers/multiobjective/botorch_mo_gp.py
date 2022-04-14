@@ -17,6 +17,7 @@ import logging
 
 import numpy as np
 import torch
+from botorch.acquisition.multi_objective import MCMultiOutputObjective
 from botorch.models import SingleTaskGP, ModelList
 from botorch.fit import fit_gpytorch_model
 from botorch.utils import standardize
@@ -46,8 +47,7 @@ from botorch.optim.optimize import optimize_acqf, optimize_acqf_list, optimize_a
 from botorch.acquisition.objective import GenericMCObjective
 from botorch.utils.multi_objective.scalarization import get_chebyshev_scalarization
 from botorch.utils.multi_objective.box_decompositions.non_dominated import FastNondominatedPartitioning
-from botorch.acquisition.multi_objective.monte_carlo import qExpectedHypervolumeImprovement, \
-    qNoisyExpectedHypervolumeImprovement
+from botorch.acquisition.multi_objective.monte_carlo import qNoisyExpectedHypervolumeImprovement
 
 from botorch import fit_gpytorch_model
 from botorch.sampling.samplers import SobolQMCNormalSampler
@@ -60,6 +60,8 @@ from syne_tune.optimizer.scheduler import TrialScheduler, TrialSuggestion
 from syne_tune.backend.trial_status import Trial
 import syne_tune.config_space as cs
 
+from torch import Tensor
+
 __all__ = ['BotorchMOGP']
 
 from syne_tune.optimizer.schedulers.botorch.encode_decode_utils import encode_config, decode_config
@@ -67,8 +69,51 @@ from syne_tune.optimizer.schedulers.botorch.encode_decode_utils import encode_co
 logger = logging.getLogger(__name__)
 
 
-class BotorchMOGP(TrialScheduler):
+class MyMCObj(MCMultiOutputObjective):
+    def __init__(self, y_mean, y_std, mobo_object):
+        super().__init__()
+        self.y_mean = y_mean
+        self.y_std = y_std
+        self.mobo_object = mobo_object
+        self.instance_info = InstanceInfos()
 
+    def forward(self, samples: Tensor, X: Optional[Tensor] = None, **kwargs) -> Tensor:
+        instance_type_int = X[..., self.mobo_object.field_to_id['config_st_instance_type']]
+        assert torch.allclose(
+            instance_type_int,
+            instance_type_int.to(dtype=torch.long).to(dtype=torch.float64))
+        instance_cost = instance_type_int.apply_(
+            lambda x: self.instance_info(
+                self.mobo_object.inv_categorical_maps['config_st_instance_type'][int(x)]).cost_per_hour)
+
+        # samples are from single output GP, so batch x q x 1, repeat to make batch x q x 2
+        samples = samples.repeat(*((samples.dim() - 1) * [1]), 2)
+
+        y0_unnorm = samples[..., 0] * self.y_std[0, 0] + self.y_mean[0, 0]
+        assert y0_unnorm.shape[-instance_cost.ndim:] == instance_cost.shape
+
+        # Apply the affine transform to 2nd output dimension
+        y1_unnorm = y0_unnorm * instance_cost
+        y1_norm = standardize(y1_unnorm)
+        samples[..., 1] = y1_norm
+
+        if y1_unnorm.shape[-1] == len(self.mobo_object.y):
+            y0_true = np.array(self.mobo_object.y)[:, 0]
+            y1_true = np.array(self.mobo_object.y)[:, 1]
+            mask = (y1_true != 1.)
+            assert np.allclose(
+                mask * y0_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
+                mask * y0_true,
+                rtol=0.2)
+            assert np.allclose(
+                mask * y1_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
+                mask * y1_true,
+                rtol=0.2)
+
+        return samples
+
+
+class BotorchMOGP(TrialScheduler):
     def __init__(
             self,
             config_space: Dict,
@@ -80,6 +125,7 @@ class BotorchMOGP(TrialScheduler):
             # fantasising: bool = True,
             num_mc_samples: int = 100,
             instance_type_features: Iterable = tuple(),
+            deterministic_transform: bool = False,
     ):
         """
         :param config_space:
@@ -101,6 +147,8 @@ class BotorchMOGP(TrialScheduler):
         # BOTorch assumes minimization so we negate the ref_point
         if self.mode == 'min':
             self.ref_point = [-v for v in ref_point]
+
+        self.deterministic_transform = deterministic_transform
 
         self.metrics = metrics
         self.num_evaluations = 0
@@ -239,28 +287,49 @@ class BotorchMOGP(TrialScheduler):
             x_unnorm = self.append_instance_type_features(self.x)
             x_norm = normalize(x_unnorm, bounds=self.bounds)
 
-            y = standardize(torch.DoubleTensor(self.y))
+            y = torch.DoubleTensor(self.y)
             if self.mode == 'min':
                 # BOTorch assumes maximization while we want to minimize so we negate the y tensor
                 y = -y
 
-            if len(self.cat_dims) > 0:
-                models = [MixedSingleTaskGP(x_norm, y[:, i:i + 1], cat_dims=self.cat_dims) for i in range(len(self.metrics))]
+            # y = standardize(y)
+            stddim = -1 if y.dim() < 2 else -2
+            y_std = y.std(dim=stddim, keepdim=True)
+            y_std = y_std.where(y_std >= 1e-9, torch.full_like(y_std, 1.0))
+            y_mean = y.mean(dim=stddim, keepdim=True)
+            y = (y - y_mean) / y_std
+
+            if self.deterministic_transform:
+                if len(self.cat_dims) > 0:
+                    models = [MixedSingleTaskGP(x_norm, y[:, 0:1], cat_dims=self.cat_dims)]
+                else:
+                    models = [SingleTaskGP(x_norm, y[:, 0:1])]
             else:
-                models = [SingleTaskGP(x_norm, y[:, i:i + 1]) for i in range(len(self.metrics))]
+                if len(self.cat_dims) > 0:
+                    models = [MixedSingleTaskGP(x_norm, y[:, i:i + 1], cat_dims=self.cat_dims)
+                              for i in range(len(self.metrics))]
+                else:
+                    models = [SingleTaskGP(x_norm, y[:, i:i + 1])
+                              for i in range(len(self.metrics))]
             model = ModelListGP(*models)
 
             mll = SumMarginalLogLikelihood(model.likelihood, model)
             fit_gpytorch_model(mll)
 
             sampler = SobolQMCNormalSampler(num_samples=self.num_mc_samples)
+            if self.deterministic_transform:
+                objective = MyMCObj(y_mean=y_mean, y_std=y_std, mobo_object=self)
+            else:
+                objective = None
 
             acq_func = qNoisyExpectedHypervolumeImprovement(
                 model=model,
                 ref_point=self.ref_point,
                 X_baseline=x_norm,
-                prune_baseline=True,
+                prune_baseline=False if self.deterministic_transform else True,
                 sampler=sampler,
+                objective=objective,
+                cache_root=False if self.deterministic_transform else True,
             )
 
             # compute all of the points in the config_space still left to consider
