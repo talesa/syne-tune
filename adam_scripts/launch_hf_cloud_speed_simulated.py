@@ -36,11 +36,10 @@ if __name__ == '__main__':
 
     # ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu')
     # instance_type_features = ('GPUFP32TFLOPS*num_gpu', 'cost_per_hour')
-    instance_type_features = ('GPUFP32TFLOPS',)
-    # instance_type_features = []
+    # instance_type_features = ('GPUFP32TFLOPS',)
+    instance_type_features = []
 
     temp = []
-    # try:
     for i in tqdm.trange(10):
         backend = UserBlackboxBackend(
             blackbox=blackbox,
@@ -53,7 +52,7 @@ if __name__ == '__main__':
             metrics=blackbox.metrics,
             ref_point=[5., 5.],
             instance_type_features=instance_type_features if len(instance_type_features) > 0 else tuple(),
-            deterministic_transform=False,
+            deterministic_transform=True,
         )
 
         stop_criterion = StoppingCriterion(max_cost=50.)
@@ -73,23 +72,6 @@ if __name__ == '__main__':
         )
         tuner.run()
         temp.append(tuner.name)
-    # except AssertionError as e:
-    #     print(e)
-    #     print(temp)
-    #     print(tuner.name)
 
     print(tuner.name)
     print(temp)
-
-    # tuner_job_name = 'test-hf-cloud-speed-remotelauncher'
-    # root = Path(syne_tune.__path__[0]).parent
-    # remote_launcher = RemoteLauncher(
-    #     tuner=tuner,
-    #     instance_type='ml.m5.large',
-    #     tuner_name=tuner_job_name,
-    #     dependencies=[str(root / "benchmarking")],
-    #     sleep_time=0.0,
-    # )
-    # remote_launcher.run(wait=False)
-    #
-    # print(f"dfff = syne_tune.experiments.load_experiment('{tuner.name}')")

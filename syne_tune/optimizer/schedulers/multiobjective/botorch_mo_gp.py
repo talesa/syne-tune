@@ -15,6 +15,9 @@ from collections import defaultdict
 from typing import Dict, Optional, List, Union, Iterable
 import logging
 
+import sys
+sys.path.insert(0, '/Users/awgol/code/botorch/')
+
 import numpy as np
 import torch
 from botorch.acquisition.multi_objective import MCMultiOutputObjective
@@ -78,37 +81,43 @@ class MyMCObj(MCMultiOutputObjective):
         self.instance_info = InstanceInfos()
 
     def forward(self, samples: Tensor, X: Optional[Tensor] = None, **kwargs) -> Tensor:
-        instance_type_int = X[..., self.mobo_object.field_to_id['config_st_instance_type']]
-        assert torch.allclose(
-            instance_type_int,
-            instance_type_int.to(dtype=torch.long).to(dtype=torch.float64))
+        X_clone = X.clone().detach()
+        instance_type_int = X_clone[..., self.mobo_object.field_to_id['config_st_instance_type']]
+        # instance_type_int2 = X[..., self.mobo_object.field_to_id['config_st_instance_type']]
+        # assert torch.allclose(
+        #     instance_type_int,
+        #     instance_type_int.to(dtype=torch.long).to(dtype=torch.float64))
         instance_cost = instance_type_int.apply_(
             lambda x: self.instance_info(
                 self.mobo_object.inv_categorical_maps['config_st_instance_type'][int(x)]).cost_per_hour)
+        # assert torch.allclose(
+        #     instance_type_int2,
+        #     instance_type_int2.to(dtype=torch.long).to(dtype=torch.float64))
 
         # samples are from single output GP, so batch x q x 1, repeat to make batch x q x 2
         samples = samples.repeat(*((samples.dim() - 1) * [1]), 2)
 
         y0_unnorm = samples[..., 0] * self.y_std[0, 0] + self.y_mean[0, 0]
-        assert y0_unnorm.shape[-instance_cost.ndim:] == instance_cost.shape
+        # assert y0_unnorm.shape[-instance_cost.ndim:] == instance_cost.shape
 
         # Apply the affine transform to 2nd output dimension
         y1_unnorm = y0_unnorm * instance_cost
-        y1_norm = standardize(y1_unnorm)
+        # y1_norm = standardize(y1_unnorm)
+        y1_norm = (y1_unnorm - self.y_mean[0, 1]) / self.y_std[0, 1]
         samples[..., 1] = y1_norm
 
-        if y1_unnorm.shape[-1] == len(self.mobo_object.y):
-            y0_true = np.array(self.mobo_object.y)[:, 0]
-            y1_true = np.array(self.mobo_object.y)[:, 1]
-            mask = (y1_true != 1.)
-            assert np.allclose(
-                mask * y0_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
-                mask * y0_true,
-                rtol=0.2)
-            assert np.allclose(
-                mask * y1_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
-                mask * y1_true,
-                rtol=0.2)
+        # if y1_unnorm.shape[-1] == len(self.mobo_object.y):
+        # #     y0_true = np.array(self.mobo_object.y)[:, 0]
+        #     y1_true = np.array(self.mobo_object.y)[:, 1]
+        #     mask = (y1_true != 1.)
+        #     assert np.allclose(
+        #         mask * y0_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
+        #         mask * y0_true,
+        #         rtol=0.2)
+        #     assert np.allclose(
+        #         mask * y1_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
+        #         mask * y1_true,
+        #         rtol=0.2)
 
         return samples
 
@@ -172,7 +181,10 @@ class BotorchMOGP(TrialScheduler):
 
         # Additional per-instance_type features
         for v in instance_type_features:
-            assert v in ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu')
+            assert v in (
+                'GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu',
+                'GPUMemory/batch_size',
+            )
         self.instance_type_features = instance_type_features
 
         instance_info = InstanceInfos()
@@ -326,7 +338,7 @@ class BotorchMOGP(TrialScheduler):
                 model=model,
                 ref_point=self.ref_point,
                 X_baseline=x_norm,
-                prune_baseline=False if self.deterministic_transform else True,
+                prune_baseline=True,#False if self.deterministic_transform else True,
                 sampler=sampler,
                 objective=objective,
                 cache_root=False if self.deterministic_transform else True,
