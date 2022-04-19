@@ -12,10 +12,13 @@
 # permissions and limitations under the License.
 import itertools
 from collections import defaultdict
-from typing import Dict, Optional, List, Union, Iterable
+from typing import Dict, Optional, List, Union, Iterable, Sequence, Sized
 import logging
 
 import sys
+
+from botorch.models.transforms.input import InputTransform, ChainedInputTransform, Normalize
+
 sys.path.insert(0, '/Users/awgol/code/botorch/')
 
 import numpy as np
@@ -64,6 +67,7 @@ from syne_tune.backend.trial_status import Trial
 import syne_tune.config_space as cs
 
 from torch import Tensor
+from torch.nn import Module
 
 __all__ = ['BotorchMOGP']
 
@@ -122,6 +126,61 @@ class MyMCObj(MCMultiOutputObjective):
         return samples
 
 
+class CustomFeatures(InputTransform, Module):
+    def __init__(
+        self,
+        feature_set: Tensor,
+        transform_on_train: bool = False,
+        transform_on_eval: bool = True,
+        transform_on_fantasize: bool = False,
+    ) -> None:
+        r"""Append `feature_set` to each input.
+
+        Args:
+            feature_set: An `n_f x d_f`-dim tensor denoting the features to be
+                appended to the inputs.
+            transform_on_train: A boolean indicating whether to apply the
+                transforms in train() mode. Default: False.
+            transform_on_eval: A boolean indicating whether to apply the
+                transform in eval() mode. Default: True.
+            transform_on_fantasize: A boolean indicating whether to apply the
+                transform when called from within a `fantasize` call. Default: False.
+        """
+        super().__init__()
+        if feature_set.dim() != 2:
+            raise ValueError("`feature_set` must be an `n_f x d_f`-dim tensor!")
+        self.register_buffer("feature_set", feature_set)
+        self.transform_on_train = transform_on_train
+        self.transform_on_eval = transform_on_eval
+        self.transform_on_fantasize = transform_on_fantasize
+
+    def transform(self, X: Tensor) -> Tensor:
+        r"""Transform the inputs by appending `feature_set` to each input.
+
+        For each `1 x d`-dim element in the input tensor, this will produce
+        an `n_f x (d + d_f)`-dim tensor with `feature_set` appended as the last `d_f`
+        dimensions. For a generic `batch_shape x q x d`-dim `X`, this translates to a
+        `batch_shape x (q * n_f) x (d + d_f)`-dim output, where the values corresponding
+        to `X[..., i, :]` are found in `output[..., i * n_f: (i + 1) * n_f, :]`.
+
+        Note: Adding the `feature_set` on the `q-batch` dimension is necessary to avoid
+        introducing additional bias by evaluating the inputs on independent GP
+        sample paths.
+
+        Args:
+            X: A `batch_shape x q x d`-dim tensor of inputs.
+
+        Returns:
+            A `batch_shape x (q * n_f) x (d + d_f)`-dim tensor of appended inputs.
+        """
+        expanded_X = X.unsqueeze(dim=-2).expand(
+            *X.shape[:-1], self.feature_set.shape[0], -1
+        )
+        expanded_features = self.feature_set.expand(*expanded_X.shape[:-1], -1)
+        appended_X = torch.cat([expanded_X, expanded_features], dim=-1)
+        return appended_X.view(*X.shape[:-2], -1, appended_X.shape[-1])
+
+
 class BotorchMOGP(TrialScheduler):
     def __init__(
             self,
@@ -133,7 +192,7 @@ class BotorchMOGP(TrialScheduler):
             points_to_evaluate: Optional[List[Dict]] = None,
             # fantasising: bool = True,
             num_mc_samples: int = 100,
-            instance_type_features: Iterable = tuple(),
+            instance_type_features: Sequence = tuple(),
             deterministic_transform: bool = False,
     ):
         """
@@ -297,7 +356,8 @@ class BotorchMOGP(TrialScheduler):
     def sample_gp(self) -> Union[dict, None]:
         try:
             x_unnorm = self.append_instance_type_features(self.x)
-            x_norm = normalize(x_unnorm, bounds=self.bounds)
+            # x_norm = normalize(x_unnorm, bounds=self.bounds)
+            # x_unnorm = torch.DoubleTensor(np.stack(self.x, axis=0))
 
             y = torch.DoubleTensor(self.y)
             if self.mode == 'min':
@@ -311,18 +371,31 @@ class BotorchMOGP(TrialScheduler):
             y_mean = y.mean(dim=stddim, keepdim=True)
             y = (y - y_mean) / y_std
 
+            input_transforms = ChainedInputTransform(
+                # tf1=None,
+                tf2=Normalize(d=x_unnorm.shape[-1],
+                              bounds=self.bounds,
+                              indices=list(range(1, 3 + len(self.instance_type_features)))),
+            )
+
             if self.deterministic_transform:
                 if len(self.cat_dims) > 0:
-                    models = [MixedSingleTaskGP(x_norm, y[:, 0:1], cat_dims=self.cat_dims)]
+                    models = [MixedSingleTaskGP(x_unnorm, y[:, 0:1],
+                                                cat_dims=self.cat_dims,
+                                                input_transform=input_transforms)]
                 else:
-                    models = [SingleTaskGP(x_norm, y[:, 0:1])]
+                    raise NotImplementedError
+                    # models = [SingleTaskGP(x_norm, y[:, 0:1])]
             else:
                 if len(self.cat_dims) > 0:
-                    models = [MixedSingleTaskGP(x_norm, y[:, i:i + 1], cat_dims=self.cat_dims)
+                    models = [MixedSingleTaskGP(x_unnorm, y[:, i:i + 1],
+                                                cat_dims=self.cat_dims,
+                                                input_transform=input_transforms)
                               for i in range(len(self.metrics))]
                 else:
-                    models = [SingleTaskGP(x_norm, y[:, i:i + 1])
-                              for i in range(len(self.metrics))]
+                    raise NotImplementedError
+                    # models = [SingleTaskGP(x_norm, y[:, i:i + 1])
+                    #           for i in range(len(self.metrics))]
             model = ModelListGP(*models)
 
             mll = SumMarginalLogLikelihood(model.likelihood, model)
@@ -337,8 +410,9 @@ class BotorchMOGP(TrialScheduler):
             acq_func = qNoisyExpectedHypervolumeImprovement(
                 model=model,
                 ref_point=self.ref_point,
-                X_baseline=x_norm,
-                prune_baseline=True,#False if self.deterministic_transform else True,
+                # X_baseline=x_norm,
+                X_baseline=x_unnorm,
+                prune_baseline=True,  # False if self.deterministic_transform else True,
                 sampler=sampler,
                 objective=objective,
                 cache_root=False if self.deterministic_transform else True,
