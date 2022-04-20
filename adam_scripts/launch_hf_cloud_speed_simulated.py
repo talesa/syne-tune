@@ -35,11 +35,14 @@ if __name__ == '__main__':
     elapsed_time_attr = 'st_worker_time'
 
     # ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu')
-    # instance_type_features = ('GPUFP32TFLOPS*num_gpu', 'cost_per_hour')
-    # instance_type_features = ('GPUFP32TFLOPS',)
-    instance_type_features = []
+    # features = ('GPUFP32TFLOPS*num_gpu', 'cost_per_hour')
+    # features = ('GPUFP32TFLOPS',)
+    features = ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers')
+    # features = ('instance_type_family', 'GPUMemory/batch_size', 'config_dataloader_num_workers')
+    features = ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers')
 
     temp = []
+    print(features)
     for i in tqdm.trange(10):
         backend = UserBlackboxBackend(
             blackbox=blackbox,
@@ -51,11 +54,11 @@ if __name__ == '__main__':
             mode='min',
             metrics=blackbox.metrics,
             ref_point=[5., 5.],
-            instance_type_features=instance_type_features if len(instance_type_features) > 0 else tuple(),
-            deterministic_transform=True,
+            features=features if len(features) > 0 else tuple(),
+            deterministic_transform=False,
         )
 
-        stop_criterion = StoppingCriterion(max_cost=50.)
+        stop_criterion = StoppingCriterion(max_cost=20.)
 
         # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
         tuner = Tuner(

@@ -126,59 +126,41 @@ class MyMCObj(MCMultiOutputObjective):
         return samples
 
 
-class CustomFeatures(InputTransform, Module):
-    def __init__(
-        self,
-        feature_set: Tensor,
-        transform_on_train: bool = False,
-        transform_on_eval: bool = True,
-        transform_on_fantasize: bool = False,
-    ) -> None:
-        r"""Append `feature_set` to each input.
+# class TransformFeatures(InputTransform, Module):
+#     def __init__(self, mobo_object, features) -> None:
+#         r"""Append `feature_set` to each input."""
+#         super().__init__()
+#         self.mobo_object = mobo_object
+#         self.features = features
+#         self.transform_on_train = True
+#         self.transform_on_eval = True
+#         self.transform_on_fantasize = True
+#
+#     def transform(self, X: Tensor) -> Tensor:
+#         X_clone = X.clone().detach()
+#         instance_type_int = X_clone[..., self.mobo_object.field_to_id['config_st_instance_type']]
+#
+#         tensors_to_append = []
+#         for k in self.features:
+#             instance_cost = instance_type_int.apply_(
+#                 lambda x: self.instance_info(
+#                     self.mobo_object.inv_categorical_maps['config_st_instance_type'][int(x)]).cost_per_hour)
 
-        Args:
-            feature_set: An `n_f x d_f`-dim tensor denoting the features to be
-                appended to the inputs.
-            transform_on_train: A boolean indicating whether to apply the
-                transforms in train() mode. Default: False.
-            transform_on_eval: A boolean indicating whether to apply the
-                transform in eval() mode. Default: True.
-            transform_on_fantasize: A boolean indicating whether to apply the
-                transform when called from within a `fantasize` call. Default: False.
-        """
-        super().__init__()
-        if feature_set.dim() != 2:
-            raise ValueError("`feature_set` must be an `n_f x d_f`-dim tensor!")
-        self.register_buffer("feature_set", feature_set)
-        self.transform_on_train = transform_on_train
-        self.transform_on_eval = transform_on_eval
-        self.transform_on_fantasize = transform_on_fantasize
+        # for v in X[..., 0]:
+        #     instance_type_field = int(v[self.field_to_id['config_st_instance_type']])
+        #     instance_type_string = self.inv_categorical_maps['config_st_instance_type'][instance_type_field]
+        #     instance_type_feature_vector.append(self.instance_type_to_tuple_features_dict[instance_type_string])
+        # instance_type_feature_tensor = torch.DoubleTensor(instance_type_feature_vector)
 
-    def transform(self, X: Tensor) -> Tensor:
-        r"""Transform the inputs by appending `feature_set` to each input.
+        # output = torch.cat([X, instance_type_feature_tensor], dim=-1)
+        # return None
 
-        For each `1 x d`-dim element in the input tensor, this will produce
-        an `n_f x (d + d_f)`-dim tensor with `feature_set` appended as the last `d_f`
-        dimensions. For a generic `batch_shape x q x d`-dim `X`, this translates to a
-        `batch_shape x (q * n_f) x (d + d_f)`-dim output, where the values corresponding
-        to `X[..., i, :]` are found in `output[..., i * n_f: (i + 1) * n_f, :]`.
-
-        Note: Adding the `feature_set` on the `q-batch` dimension is necessary to avoid
-        introducing additional bias by evaluating the inputs on independent GP
-        sample paths.
-
-        Args:
-            X: A `batch_shape x q x d`-dim tensor of inputs.
-
-        Returns:
-            A `batch_shape x (q * n_f) x (d + d_f)`-dim tensor of appended inputs.
-        """
-        expanded_X = X.unsqueeze(dim=-2).expand(
-            *X.shape[:-1], self.feature_set.shape[0], -1
-        )
-        expanded_features = self.feature_set.expand(*expanded_X.shape[:-1], -1)
-        appended_X = torch.cat([expanded_X, expanded_features], dim=-1)
-        return appended_X.view(*X.shape[:-2], -1, appended_X.shape[-1])
+        # expanded_X = X.unsqueeze(dim=-2).expand(
+        #     *X.shape[:-1], self.feature_set.shape[0], -1
+        # )
+        # expanded_features = self.feature_set.expand(*expanded_X.shape[:-1], -1)
+        # appended_X = torch.cat([expanded_X, expanded_features], dim=-1)
+        # return appended_X.view(*X.shape[:-2], -1, appended_X.shape[-1])
 
 
 class BotorchMOGP(TrialScheduler):
@@ -192,7 +174,7 @@ class BotorchMOGP(TrialScheduler):
             points_to_evaluate: Optional[List[Dict]] = None,
             # fantasising: bool = True,
             num_mc_samples: int = 100,
-            instance_type_features: Sequence = tuple(),
+            features: Sequence = tuple(),
             deterministic_transform: bool = False,
     ):
         """
@@ -232,59 +214,22 @@ class BotorchMOGP(TrialScheduler):
         self.inv_categorical_maps = {
             hp: dict(zip(map.values(), map.keys())) for hp, map in self.categorical_maps.items()
         }
+        map_instance_type_family = tuple(set(
+            k.split('.')[1] for k in self.categorical_maps['config_st_instance_type'].keys()))
+        self.categorical_maps['instance_type_family'] = {k: i for i, k in enumerate(map_instance_type_family)}
+        self.inv_categorical_maps['instance_type_family'] = {i: k for i, k in enumerate(map_instance_type_family)}
         self.pending_trials = {}
         # self.fantasising = fantasising
         self.num_mc_samples = num_mc_samples
-
-        self.cat_dims = [i for i, v in enumerate(self.config_space.values()) if isinstance(v, cs.Categorical)]
-
-        # Additional per-instance_type features
-        for v in instance_type_features:
-            assert v in (
-                'GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu',
-                'GPUMemory/batch_size',
-            )
-        self.instance_type_features = instance_type_features
-
-        instance_info = InstanceInfos()
-        self.instance_type_to_tuple_features_dict = {}
-        per_feature_values = defaultdict(list)
-        for instance_type in self.config_space['config_st_instance_type']:
-            record = []
-            for k in self.instance_type_features:
-                fields = k.split('*')
-                value = np.prod(tuple(instance_info(instance_type).__dict__[f] for f in fields))
-                record.append(value)
-                per_feature_values[k].append(value)
-            self.instance_type_to_tuple_features_dict[instance_type] = tuple(record)
-
-        bounds = []
-        # bounds for the self.config_space variables
-        for name, domain in self.config_space.items():
-            # We are treating config_st_instance_type as a categorical in the BOTorch framework, it should not be
-            # normalized so need to set its bounds to [0, 1].
-            if isinstance(domain, cs.Categorical):
-                bound = (0., 1.)
-            # for domains with attributes lower and upper, they define the bounds
-            elif hasattr(domain, "lower") and hasattr(domain, "upper"):
-                bound = (domain.lower, domain.upper)
-            else:
-                raise Exception(f"Cannot add a bound for parameter: {name} {domain}")
-            bounds.append(bound)
-        # bounds for per-instance_type features
-        for k in self.instance_type_features:
-            bounds.append((min(per_feature_values[k]), max(per_feature_values[k])))
-        self.bounds = torch.DoubleTensor(bounds).to(dtype=torch.double).T
-        assert (self.bounds.shape[0] == 2), "self.bounds should have shape [2, number_of_hparams]"
 
         self.field_to_id = {k: i for i, k in enumerate(self.config_space.keys())}
 
         # TODO how to generate all values from a discrete hp config like finrange?
         #  Then we could use itertools.product rather than sampling which is very silly
         all_possible_configs = set(tuple(v.sample() for v in self.config_space.values()) for _ in range(10000))
-        all_configs_dicts = [{k: v for k, v in zip(self.config_space.keys(), config)} for config in
-                             all_possible_configs]
-        self.all_configs_vector = {
+        all_configs_dicts = tuple({k: v for k, v in zip(self.config_space.keys(), config)}
+                                  for config in all_possible_configs)
+        self.all_configs_vector = dict.fromkeys(
             tuple(encode_config(
                 config=config,
                 config_space=self.config_space,
@@ -292,7 +237,54 @@ class BotorchMOGP(TrialScheduler):
                 cat_to_onehot=False,
                 normalize_bounded_domains=False,
             ))
-            for config in all_configs_dicts}
+            for config in all_configs_dicts)
+        self.number_of_combinations = len(self.all_configs_vector)
+
+        self.features = features
+
+        instance_info = InstanceInfos()
+
+        self.config_to_tuple_features_dict = {}
+        cat_dims = set()
+        per_feature_values = defaultdict(list)
+        # TODO could vectorize this
+        for config_dict, config_tuple in zip(all_configs_dicts, self.all_configs_vector.keys()):
+            record = []
+            for i, k in enumerate(self.features):
+                # This needs to be maintained
+                if k in ('config_st_instance_type',):
+                    value = self.categorical_maps['config_st_instance_type'][config_dict['config_st_instance_type']]
+                    cat_dims.add(i)
+                elif k in ('instance_type_family',):
+                    value = self.categorical_maps['instance_type_family'][
+                        config_dict['config_st_instance_type'].split('.')[1]]
+                    cat_dims.add(i)
+                elif k in ('config_per_device_train_batch_size', 'config_dataloader_num_workers'):
+                    value = config_dict[k]
+                elif k in ('GPUMemory/batch_size',):
+                    value = (instance_info(config_dict['config_st_instance_type']).__dict__['GPUMemory'] /
+                             config_dict['config_per_device_train_batch_size'])
+                elif k in ('GPUFP32TFLOPS*num_gpu',):
+                    fields = k.split('*')
+                    value = np.prod(tuple(instance_info(config_dict['config_st_instance_type']).__dict__[f] for f in fields))
+                elif k in ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory',):
+                    value = instance_info(config_dict['config_st_instance_type']).__dict__[k]
+                else:
+                    raise ValueError(f'Unrecognized feature: {k}')
+                record.append(value)
+                per_feature_values[k].append(value)
+            self.config_to_tuple_features_dict[config_tuple] = tuple(record)
+
+        self.cat_dims = list(cat_dims)
+
+        bounds = []
+        for i, k in enumerate(self.features):
+            if i in self.cat_dims:
+                bounds.append((0., 1.))
+            else:
+                bounds.append((min(per_feature_values[k]), max(per_feature_values[k])))
+        self.bounds = torch.DoubleTensor(bounds).T
+        assert (self.bounds.shape[0] == 2), "self.bounds should have shape [2, number_of_hparams]"
 
     def on_trial_complete(self, trial: Trial, result: Dict):
         # update available observations with final result
@@ -342,21 +334,21 @@ class BotorchMOGP(TrialScheduler):
         else:
             return self.sample_random()
 
-    def append_instance_type_features(self, x):
-        instance_type_feature_vector = list()
-        for v in x:
-            instance_type_field = int(v[self.field_to_id['config_st_instance_type']])
-            instance_type_string = self.inv_categorical_maps['config_st_instance_type'][instance_type_field]
-            instance_type_feature_vector.append(self.instance_type_to_tuple_features_dict[instance_type_string])
-        instance_type_feature_tensor = torch.DoubleTensor(instance_type_feature_vector)
-
-        output = torch.cat([torch.DoubleTensor(np.stack(x, axis=0)), instance_type_feature_tensor], dim=1)
-        return output
+    # def append_instance_type_features(self, x):
+    #     instance_type_feature_vector = list()
+    #     for v in x:
+    #         instance_type_field = int(v[self.field_to_id['config_st_instance_type']])
+    #         instance_type_string = self.inv_categorical_maps['config_st_instance_type'][instance_type_field]
+    #         instance_type_feature_vector.append(self.instance_type_to_tuple_features_dict[instance_type_string])
+    #     instance_type_feature_tensor = torch.DoubleTensor(instance_type_feature_vector)
+    #
+    #     output = torch.cat([torch.DoubleTensor(np.stack(x, axis=0)), instance_type_feature_tensor], dim=1)
+    #     return output
 
     def sample_gp(self) -> Union[dict, None]:
         try:
-            x_unnorm = self.append_instance_type_features(self.x)
-            # x_norm = normalize(x_unnorm, bounds=self.bounds)
+            x_unnorm = torch.DoubleTensor(np.stack([self.config_to_tuple_features_dict[k] for k in self.x], axis=0))
+            x_norm = normalize(x_unnorm, bounds=self.bounds)
             # x_unnorm = torch.DoubleTensor(np.stack(self.x, axis=0))
 
             y = torch.DoubleTensor(self.y)
@@ -371,16 +363,18 @@ class BotorchMOGP(TrialScheduler):
             y_mean = y.mean(dim=stddim, keepdim=True)
             y = (y - y_mean) / y_std
 
-            input_transforms = ChainedInputTransform(
-                # tf1=None,
-                tf2=Normalize(d=x_unnorm.shape[-1],
-                              bounds=self.bounds,
-                              indices=list(range(1, 3 + len(self.instance_type_features)))),
-            )
+            # non_cat_indices = list(set(range(len(self.features))) - set(self.cat_dims))
+            # input_transforms = ChainedInputTransform(
+            #     # tf1=CustomFeatures(),
+            #     tf2=Normalize(d=x_unnorm.shape[-1],
+            #                   bounds=self.bounds,
+            #                   indices=non_cat_indices),
+            # )
+            input_transforms = None
 
             if self.deterministic_transform:
                 if len(self.cat_dims) > 0:
-                    models = [MixedSingleTaskGP(x_unnorm, y[:, 0:1],
+                    models = [MixedSingleTaskGP(x_norm, y[:, 0:1],
                                                 cat_dims=self.cat_dims,
                                                 input_transform=input_transforms)]
                 else:
@@ -388,7 +382,7 @@ class BotorchMOGP(TrialScheduler):
                     # models = [SingleTaskGP(x_norm, y[:, 0:1])]
             else:
                 if len(self.cat_dims) > 0:
-                    models = [MixedSingleTaskGP(x_unnorm, y[:, i:i + 1],
+                    models = [MixedSingleTaskGP(x_norm, y[:, i:i + 1],
                                                 cat_dims=self.cat_dims,
                                                 input_transform=input_transforms)
                               for i in range(len(self.metrics))]
@@ -410,8 +404,8 @@ class BotorchMOGP(TrialScheduler):
             acq_func = qNoisyExpectedHypervolumeImprovement(
                 model=model,
                 ref_point=self.ref_point,
-                # X_baseline=x_norm,
-                X_baseline=x_unnorm,
+                X_baseline=x_norm,
+                # X_baseline=x_unnorm,
                 prune_baseline=True,  # False if self.deterministic_transform else True,
                 sampler=sampler,
                 objective=objective,
@@ -419,22 +413,30 @@ class BotorchMOGP(TrialScheduler):
             )
 
             # compute all of the points in the config_space still left to consider
-            x_to_consider_unnorm = tuple(self.all_configs_vector.difference(set(self.x)))
-            if len(x_to_consider_unnorm) == 0:
+            for config in self.x:
+                self.all_configs_vector.pop(config, None)
+            x_to_consider = tuple(self.all_configs_vector.keys())
+            # x_to_consider = list(self.all_configs_vector).difference(set(self.x)))
+            if len(x_to_consider) == 0:
                 # No more points in the config space to consider, the end of the optimization
                 return None
-            if not (len(x_to_consider_unnorm) + len(self.x) == len(self.all_configs_vector)):
+            # if not (len(x_to_consider) + len(self.x) == len(self.all_configs_vector)):
+            #     raise Exception('Value has not been removed from self.all_configs_vector correctly.')
+            if not (len(self.all_configs_vector) + len(self.x) == self.number_of_combinations):
                 raise Exception('Value has not been removed from self.all_configs_vector correctly.')
 
-            x_to_consider_unnorm = self.append_instance_type_features(x_to_consider_unnorm)
+            x_to_consider_unnorm = torch.DoubleTensor(np.stack([
+                self.config_to_tuple_features_dict[k] for k in x_to_consider], axis=0))
+            # x_to_consider_unnorm = self.append_instance_type_features(x_to_consider_unnorm)
             x_to_consider_norm = normalize(x_to_consider_unnorm, self.bounds)
             # batch_shape below required to compute the acquisition function over different possible points rather than
             # all of those points jointly
             acq_func_values = acq_func(x_to_consider_norm.reshape(-1, 1, x_to_consider_norm.shape[-1]))
+            # acq_func_values = acq_func(x_to_consider_unnorm.reshape(-1, 1, x_to_consider_unnorm.shape[-1]))
             acq_func_idxmax = acq_func_values.argmax()
-            candidate = np.array(x_to_consider_unnorm[acq_func_idxmax], dtype=np.double)
+            candidate = np.array(x_to_consider[acq_func_idxmax], dtype=np.double)
             # take only the fields contained in self.config_space
-            candidate = candidate[:len(x_to_consider_unnorm[0]) - len(self.instance_type_features)]
+            # candidate = candidate[:len(x_to_consider_unnorm[0]) - len(self.features)]
 
             return decode_config(
                 config_space=self.config_space,
@@ -447,6 +449,7 @@ class BotorchMOGP(TrialScheduler):
         except NotPSDError as e:
             # In case Cholesky inversion fails, we sample randomly.
             logger.info("Chlolesky failed, sampling randomly.")
+            print("Chlolesky failed, sampling randomly.")
             return self.sample_random()
 
     def metric_names(self) -> List[str]:
