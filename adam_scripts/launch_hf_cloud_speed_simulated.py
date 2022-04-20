@@ -11,19 +11,7 @@ from syne_tune.tuner import Tuner
 
 import tqdm
 
-import syne_tune.experiments
-
-import sagemaker
-import boto3
-
-from syne_tune.util import s3_experiment_path
-
 if __name__ == '__main__':
-    # boto3.setup_default_session(region_name='us-west-2')
-    # tuner_name = 'simulated-tabular-backend-2022-04-11-17-33-57-906'
-    # print(f's3_experiment_path(tuner_name=tuner_name): {s3_experiment_path(tuner_name=tuner_name)}')
-    # print(syne_tune.experiments.load_experiment(tuner_name=tuner_name))
-
     parser = ArgumentParser()
     parser.add_argument('-f', '--features', nargs='+', required=True)
     parser.add_argument('-i', '--iters', type=int, default=10)
@@ -40,13 +28,6 @@ if __name__ == '__main__':
     n_workers = 1
 
     elapsed_time_attr = 'st_worker_time'
-
-    # ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu')
-    # features = ('GPUFP32TFLOPS*num_gpu', 'cost_per_hour')
-    # features = ('GPUFP32TFLOPS',)
-    # features = ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers')
-    # features = ('instance_type_family', 'GPUMemory/batch_size', 'config_dataloader_num_workers')
-    # features = ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers')
 
     tuners_names = []
     for i in tqdm.trange(args.iters):
