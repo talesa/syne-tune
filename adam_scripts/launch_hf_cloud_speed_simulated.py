@@ -29,6 +29,8 @@ if __name__ == '__main__':
 
     elapsed_time_attr = 'st_worker_time'
 
+    print(args.features)
+
     tuners_names = []
     for i in tqdm.trange(args.iters):
         backend = UserBlackboxBackend(
