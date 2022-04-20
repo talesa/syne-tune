@@ -24,6 +24,7 @@ class InstanceInfo:
     num_gpu: int
     cost_per_hour: float
     GPUFP32TFLOPS: float
+    GPUMemory: float
 
 
 class InstanceInfos:
@@ -40,12 +41,15 @@ class InstanceInfos:
 
     def __call__(self, instance_type: str) -> InstanceInfo:
         row = self.df_instances.loc[self.df_instances.instance == instance_type]
+        if len(row) == 0:
+            raise ValueError(f"Could not find instance type: {instance_type}")
         return InstanceInfo(
             name=row['instance'].values[0],
             num_cpu=row['vCPU'].values[0],
             num_gpu=row['GPU'].values[0],
             cost_per_hour=row['price'].values[0],
             GPUFP32TFLOPS=row['GPUFP32TFLOPS'].values[0],
+            GPUMemory=row['GPUMemory'].values[0],
         )
 
 def select_instance_type(
