@@ -1,4 +1,5 @@
 import logging
+from argparse import ArgumentParser
 
 from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_cloud_speed import import_hf_cloud_speed
 from syne_tune.blackbox_repository.simulated_tabular_backend import UserBlackboxBackend
@@ -23,6 +24,12 @@ if __name__ == '__main__':
     # print(f's3_experiment_path(tuner_name=tuner_name): {s3_experiment_path(tuner_name=tuner_name)}')
     # print(syne_tune.experiments.load_experiment(tuner_name=tuner_name))
 
+    parser = ArgumentParser()
+    parser.add_argument('-f', '--features', nargs='+', required=True)
+    parser.add_argument('-i', '--iters', type=int, default=10)
+    parser.add_argument('-mc', '--max_cost', type=float, default=20.)
+    args, _ = parser.parse_known_args()
+
     logging.getLogger().setLevel(logging.CRITICAL)
 
     # loading data and querying stuff
@@ -37,13 +44,12 @@ if __name__ == '__main__':
     # ('GPUFP32TFLOPS', 'cost_per_hour', 'num_cpu', 'num_gpu', 'GPUMemory', 'GPUFP32TFLOPS*num_gpu')
     # features = ('GPUFP32TFLOPS*num_gpu', 'cost_per_hour')
     # features = ('GPUFP32TFLOPS',)
-    features = ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers')
+    # features = ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers')
     # features = ('instance_type_family', 'GPUMemory/batch_size', 'config_dataloader_num_workers')
-    features = ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers')
+    # features = ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers')
 
-    temp = []
-    print(features)
-    for i in tqdm.trange(10):
+    tuners_names = []
+    for i in tqdm.trange(args.iters):
         backend = UserBlackboxBackend(
             blackbox=blackbox,
             elapsed_time_attr=elapsed_time_attr,
@@ -53,12 +59,12 @@ if __name__ == '__main__':
             config_space=blackbox.configuration_space,
             mode='min',
             metrics=blackbox.metrics,
-            ref_point=[5., 5.],
-            features=features if len(features) > 0 else tuple(),
+            ref_point=[5., 5.],  # since the objectives are standardized (mean=0, std=1)
+            features=args.features,
             deterministic_transform=False,
         )
 
-        stop_criterion = StoppingCriterion(max_cost=20.)
+        stop_criterion = StoppingCriterion(max_cost=args.max_cost)
 
         # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
         tuner = Tuner(
@@ -74,7 +80,6 @@ if __name__ == '__main__':
             callbacks=[SimulatorCallback()],
         )
         tuner.run()
-        temp.append(tuner.name)
+        tuners_names.append(tuner.name)
 
-    print(tuner.name)
-    print(temp)
+    print(f'({args.features}, {tuners_names})')
