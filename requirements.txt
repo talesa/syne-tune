@@ -10,6 +10,8 @@ ujson
 
 typing_extensions
 
+xgboost
+
 # for testing
 pytest
 
