@@ -11,11 +11,14 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 """
-Train a Cartpole with PPO using Ray, the discount factor can be tuned.
+Trains a simple time forecasting model using GluonTS.
 """
 import logging
+import os
+from pathlib import Path
 
 from gluonts.evaluation import make_evaluation_predictions, Evaluator
+from gluonts.model.deepar import DeepAREstimator
 
 from syne_tune import Reporter
 from argparse import ArgumentParser
@@ -23,7 +26,10 @@ from gluonts.model.simple_feedforward import SimpleFeedForwardEstimator
 from gluonts.mx.trainer import Trainer
 from gluonts.mx.trainer.callback import Callback
 from gluonts.core.component import validated
-from gluonts.dataset.repository.datasets import get_dataset
+from gluonts.dataset.repository.datasets import get_dataset, default_dataset_path
+
+# import mxnet as mx
+# import torch
 
 
 class GluontsTuneReporter(Callback):
@@ -55,8 +61,8 @@ class GluontsTuneReporter(Callback):
             "epoch_loss": epoch_loss,
         }
         predictor = self.estimator.create_predictor(
-             transformation=self.estimator.create_transformation(),
-             trained_network=training_network,
+            transformation=self.estimator.create_transformation(),
+            trained_network=training_network,
         )
         metrics["mean_wQuantileLoss"] = self.compute_metrics(predictor, self.val_dataset)["mean_wQuantileLoss"]
         self.reporter(**metrics)
@@ -72,13 +78,41 @@ if __name__ == '__main__':
     parser.add_argument('--num_cells', type=int, default=40)
     parser.add_argument('--num_layers', type=int, default=2)
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--dataset', type=str, default="m4_hourly")
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--dataset', type=str, default="electricity")
+    parser.add_argument('--only_benchmark_speed', type=int, default=0)
 
     args, _ = parser.parse_known_args()
 
-    dataset = get_dataset(args.dataset, regenerate=False)
+    if args.only_benchmark_speed != 0:
+        root.info(
+            "args.only_benchmark_speed=1 so overriding defaults to args.epochs=2 and args.num_batches_per_epoch=1")
+        args.epochs = 2
+        num_batches_per_epoch = 1
+    else:
+        num_batches_per_epoch = 500
+
+    if "SM_CHANNEL_TRAIN" in os.environ:
+        dataset_path = Path(os.environ["SM_CHANNEL_TRAIN"])
+    else:
+        dataset_path = default_dataset_path
+
+    dataset = get_dataset(args.dataset, path=dataset_path, regenerate=False)
     prediction_length = dataset.metadata.prediction_length
     freq = dataset.metadata.freq
+    context_length = prediction_length
+
+    # TODO remove me
+    prediction_length = 48
+    context_length = 72
+
+    # print(f'mx.context.num_gpus(): {mx.context.num_gpus()}')
+    # # print(f'torch.cuda.is_available(): {torch.cuda.is_available()}')
+    #
+    # stream = os.popen('nvcc --version')
+    # output = stream.read()
+    # print('nvcc --version')
+    # print(output)
 
     # TODO, we should provide a validation split in all our datasets
     #  for now we use the test as the validation.
@@ -87,14 +121,18 @@ if __name__ == '__main__':
     trainer = Trainer(
         learning_rate=args.lr,
         epochs=args.epochs,
-        num_batches_per_epoch=500,
+        num_batches_per_epoch=num_batches_per_epoch,
         callbacks=[reporter],
+        # ctx=mx.context.gpu() if mx.context.num_gpus() > 0 else None,
     )
-    estimator = SimpleFeedForwardEstimator(
-        num_hidden_dimensions=args.num_layers * [args.num_cells],
+    estimator = DeepAREstimator(
+        num_layers=args.num_layers,
+        num_cells=args.num_cells,
+        batch_size=args.batch_size,
         prediction_length=prediction_length,
+        context_length=context_length,
         freq=freq,
-        trainer=trainer
+        trainer=trainer,
     )
     # required to pass additional context so that the callback can compute forecasting metrics
     reporter.set_estimator(estimator)
