@@ -27,7 +27,6 @@ from syne_tune.backend.sagemaker_backend.instance_info import select_instance_ty
 from syne_tune.backend.sagemaker_backend.sagemaker_utils import get_execution_role
 from syne_tune.optimizer.baselines import ASHA, RandomSearch
 from syne_tune import Tuner, StoppingCriterion
-from syne_tune.config_space import loguniform, lograndint, choice
 import syne_tune.config_space as cs
 from syne_tune.remote.remote_launcher import RemoteLauncher
 
@@ -37,6 +36,7 @@ if __name__ == '__main__':
 
     # instance_types = select_instance_type(min_gpu=0, max_cost_per_hour=20.0)
     instance_types = [
+        # CPU
         'ml.c4.2xlarge',
         'ml.c4.4xlarge',
         'ml.c4.8xlarge',
@@ -91,37 +91,42 @@ if __name__ == '__main__':
     # instance_types = ['ml.c5n.18xlarge',]
     # instance_types = ['ml.p3.2xlarge', ]
 
+    # config_space = {
+    #     "lr": 1e-4,
+    #     "epochs": 100,
+    #     "num_cells": cs.choice([30, 200]),
+    #     "num_layers": cs.choice([1, 4]),
+    #     "batch_size": 128,
+    #     "dataset": "electricity",
+    #     "st_instance_type": cs.choice(instance_types),
+    #     "only_benchmark_speed": 1,
+    # }
+    # tuner_name = 'deepar-speed-bs-128-prev'
+
     config_space = {
-        # "lr": loguniform(1e-4, 1e-1),
-        "lr": 1e-4,
         "epochs": 100,
-        # "num_cells": lograndint(lower=1, upper=200),
-        # "num_cells": cs.choice([1] + [i * 10 for i in range(1, 21)]),
-        # "num_layers": cs.choice([1, 2, 3, 4]),
+        "lr": cs.loguniform(1e-4, 1e-1),
         # "batch_size": cs.choice([8, 16, 32, 64, 128]),
-        # "num_cells": cs.choice([200]),
-        # "num_layers": cs.choice([4]),
-        # "batch_size": cs.choice([128]),
-        # "num_cells": cs.choice([1, 50, 100, 150, 200]),
-        "num_cells": cs.choice([30, 200]),
-        "num_layers": cs.choice([1, 4]),
-        "batch_size": cs.choice([128]),
+        "num_cells": cs.randint(lower=1, upper=200),
+        "num_layers": cs.randint(lower=1, upper=4),
+        # "batch_size": cs.choice([32, 64, 128]),
+        "batch_size": cs.choice([64, 128]),
         "dataset": "electricity",
-        # "dataset": "m4_hourly",
-        "st_instance_type": cs.choice(instance_types),
-        "only_benchmark_speed": 1,
+        "st_instance_type": 'ml.c5.4xlarge',
+        "only_benchmark_speed": 0,
     }
-    tuner_name = 'deepar-speed-bs-128-prev'
+    tuner_name = 'deepar-curves-3'
+    # tuner_name = 'temp'
 
-    n_workers = 250
+    n_workers = 9
 
-    wallclock_time_budget = 3600 * 72
-    dollar_cost_budget = 200.0
+    wallclock_time_budget = 3600 * 128
+    dollar_cost_budget = 100.0
     max_num_trials_completed = 1
 
     stop_criterion = StoppingCriterion(
         # max_wallclock_time=wallclock_time_budget,
-        # max_cost=dollar_cost_budget,
+        max_cost=dollar_cost_budget,
         # max_num_trials_completed=max_num_trials_completed,
     )
 
@@ -176,7 +181,8 @@ if __name__ == '__main__':
     root = Path(syne_tune.__path__[0]).parent
     remote_launcher = RemoteLauncher(
         tuner=tuner,
-        instance_type='ml.g4dn.xlarge',
+        # instance_type='ml.g4dn.xlarge',
+        instance_type='ml.m5.large',
         tuner_name=tuner_name,
         dependencies=[str(root / "benchmarking"), str(root / "syne_tune")],
         sleep_time=15.0,
