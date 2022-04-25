@@ -369,7 +369,7 @@ class RandomSearcher(SearcherWithRandomSeed):
         configs are chosen when, and which metric values are obtained.
 
     """
-    MAX_RETRIES = 100
+    MAX_RETRIES = 100000
 
     def __init__(self, config_space, metric, points_to_evaluate=None, **kwargs):
         super().__init__(
