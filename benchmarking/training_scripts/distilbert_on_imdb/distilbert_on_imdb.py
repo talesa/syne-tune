@@ -67,8 +67,6 @@ def objective(config):
 
     train_dataset, eval_dataset = prepare_data(config, train_dataset, eval_dataset)
 
-    report = Reporter()
-
     # Download model from Hugging Face model hub
     model = AutoModelForSequenceClassification.from_pretrained(
         'distilbert-base-uncased', num_labels=2,
@@ -135,6 +133,8 @@ def objective(config):
 
     # Do not want to count the time to download the dataset and the model.
     ts_start = time.time()
+
+    report = Reporter()
 
     # Train model
     trainer.train()

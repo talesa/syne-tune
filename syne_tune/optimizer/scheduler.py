@@ -174,6 +174,7 @@ class TrialScheduler(object):
         parameters in the config space. If so, these values take precedence.
         See :class:`HyperbandScheduler` with `type = 'promotion'` for an
         example how this is used.
+        If there is no config left to explore, None should be returned.
         """
         raise NotImplementedError()
 

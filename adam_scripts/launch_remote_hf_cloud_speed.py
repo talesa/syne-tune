@@ -40,6 +40,7 @@ if __name__ == '__main__':
         ('instance_type_family', 'num_cpu', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
         ('instance_type_family', 'cost_per_hour', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
     )
+    deterministic_transform = 1
 
     experiments_names = []
     for features in feature_combinations:
@@ -50,7 +51,7 @@ if __name__ == '__main__':
             entry_point="launch_hf_cloud_speed_simulated.py",
             source_dir=str(Path(__file__).parent),
             checkpoint_s3_uri=s3_experiment_path(experiment_name=experiment_tag),
-            instance_type="ml.m5.large",
+            instance_type="ml.c4.xlarge",
             instance_count=1,
             py_version="py38",
             framework_version='1.10.0',
@@ -65,9 +66,13 @@ if __name__ == '__main__':
             "features": ' '.join(features),
             'iters': 100,
             'max_cost': 60,
+            'deterministic_transform': deterministic_transform,
+            'searcher': 'mobo',
         }
         est = PyTorch(**sm_args)
         est.fit(job_name=f"{experiment_tag}-{hash}", wait=False)
+
+        print(f"{experiment_tag}-{hash}")
 
         experiments_names.append(f"{experiment_tag}-{hash}")
 

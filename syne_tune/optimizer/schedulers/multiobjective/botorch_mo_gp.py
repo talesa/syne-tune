@@ -10,56 +10,26 @@
 # on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-import itertools
-from collections import defaultdict
-from typing import Dict, Optional, List, Union, Iterable, Sequence, Sized
 import logging
-
 import sys
-
-from botorch.models.transforms.input import InputTransform, ChainedInputTransform, Normalize
+from collections import defaultdict
+from typing import Dict, Optional, List, Union, Sequence
 
 sys.path.insert(0, '/Users/awgol/code/botorch/')
 
-import numpy as np
-import torch
-from botorch.acquisition.multi_objective import MCMultiOutputObjective
-from botorch.models import SingleTaskGP, ModelList
-from botorch.fit import fit_gpytorch_model
-from botorch.utils import standardize
-from gpytorch.mlls import ExactMarginalLogLikelihood
-from botorch.acquisition import UpperConfidenceBound
-from botorch.optim import optimize_acqf
 from gpytorch.utils.errors import NotPSDError
+from botorch.acquisition.multi_objective.objective import GenericMCMultiOutputObjective
 
-from botorch.posteriors import Posterior
-
-from botorch.models.gp_regression import FixedNoiseGP
-from botorch.models.model_list_gp_regression import ModelListGP
-from botorch.models.transforms.outcome import Standardize
-from gpytorch.mlls.sum_marginal_log_likelihood import SumMarginalLogLikelihood
-from botorch.utils.transforms import unnormalize, normalize
-from botorch.utils.sampling import draw_sobol_samples
-
-# from botorch.models.gp_regression import FixedNoiseGP
 from botorch.models.gp_regression_mixed import MixedSingleTaskGP
 from botorch.models.model_list_gp_regression import ModelListGP
-from botorch.models.transforms.outcome import Standardize
+from botorch.models.transforms.outcome import Standardize, Log, ChainedOutcomeTransform
 from gpytorch.mlls.sum_marginal_log_likelihood import SumMarginalLogLikelihood
-from botorch.utils.transforms import unnormalize, normalize
-from botorch.utils.sampling import draw_sobol_samples
+from botorch.utils.transforms import normalize
 
-from botorch.optim.optimize import optimize_acqf, optimize_acqf_list, optimize_acqf_mixed
-from botorch.acquisition.objective import GenericMCObjective
-from botorch.utils.multi_objective.scalarization import get_chebyshev_scalarization
-from botorch.utils.multi_objective.box_decompositions.non_dominated import FastNondominatedPartitioning
 from botorch.acquisition.multi_objective.monte_carlo import qNoisyExpectedHypervolumeImprovement
 
 from botorch import fit_gpytorch_model
 from botorch.sampling.samplers import SobolQMCNormalSampler
-from botorch.exceptions import BadInitialCandidatesWarning
-from botorch.utils.multi_objective.pareto import is_non_dominated
-from botorch.utils.multi_objective.box_decompositions.dominated import DominatedPartitioning
 
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.optimizer.scheduler import TrialScheduler, TrialSuggestion
@@ -67,7 +37,6 @@ from syne_tune.backend.trial_status import Trial
 import syne_tune.config_space as cs
 
 from torch import Tensor
-from torch.nn import Module
 
 __all__ = ['BotorchMOGP']
 
@@ -75,92 +44,10 @@ from syne_tune.optimizer.schedulers.botorch.encode_decode_utils import encode_co
 
 logger = logging.getLogger(__name__)
 
-
-class MyMCObj(MCMultiOutputObjective):
-    def __init__(self, y_mean, y_std, mobo_object):
-        super().__init__()
-        self.y_mean = y_mean
-        self.y_std = y_std
-        self.mobo_object = mobo_object
-        self.instance_info = InstanceInfos()
-
-    def forward(self, samples: Tensor, X: Optional[Tensor] = None, **kwargs) -> Tensor:
-        X_clone = X.clone().detach()
-        instance_type_int = X_clone[..., self.mobo_object.field_to_id['config_st_instance_type']]
-        # instance_type_int2 = X[..., self.mobo_object.field_to_id['config_st_instance_type']]
-        # assert torch.allclose(
-        #     instance_type_int,
-        #     instance_type_int.to(dtype=torch.long).to(dtype=torch.float64))
-        instance_cost = instance_type_int.apply_(
-            lambda x: self.instance_info(
-                self.mobo_object.inv_categorical_maps['config_st_instance_type'][int(x)]).cost_per_hour)
-        # assert torch.allclose(
-        #     instance_type_int2,
-        #     instance_type_int2.to(dtype=torch.long).to(dtype=torch.float64))
-
-        # samples are from single output GP, so batch x q x 1, repeat to make batch x q x 2
-        samples = samples.repeat(*((samples.dim() - 1) * [1]), 2)
-
-        y0_unnorm = samples[..., 0] * self.y_std[0, 0] + self.y_mean[0, 0]
-        # assert y0_unnorm.shape[-instance_cost.ndim:] == instance_cost.shape
-
-        # Apply the affine transform to 2nd output dimension
-        y1_unnorm = y0_unnorm * instance_cost
-        # y1_norm = standardize(y1_unnorm)
-        y1_norm = (y1_unnorm - self.y_mean[0, 1]) / self.y_std[0, 1]
-        samples[..., 1] = y1_norm
-
-        # if y1_unnorm.shape[-1] == len(self.mobo_object.y):
-        # #     y0_true = np.array(self.mobo_object.y)[:, 0]
-        #     y1_true = np.array(self.mobo_object.y)[:, 1]
-        #     mask = (y1_true != 1.)
-        #     assert np.allclose(
-        #         mask * y0_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
-        #         mask * y0_true,
-        #         rtol=0.2)
-        #     assert np.allclose(
-        #         mask * y1_unnorm.mean(dim=0).numpy() * (-1. if self.mobo_object.mode == 'min' else 1.),
-        #         mask * y1_true,
-        #         rtol=0.2)
-
-        return samples
-
-
-# class TransformFeatures(InputTransform, Module):
-#     def __init__(self, mobo_object, features) -> None:
-#         r"""Append `feature_set` to each input."""
-#         super().__init__()
-#         self.mobo_object = mobo_object
-#         self.features = features
-#         self.transform_on_train = True
-#         self.transform_on_eval = True
-#         self.transform_on_fantasize = True
-#
-#     def transform(self, X: Tensor) -> Tensor:
-#         X_clone = X.clone().detach()
-#         instance_type_int = X_clone[..., self.mobo_object.field_to_id['config_st_instance_type']]
-#
-#         tensors_to_append = []
-#         for k in self.features:
-#             instance_cost = instance_type_int.apply_(
-#                 lambda x: self.instance_info(
-#                     self.mobo_object.inv_categorical_maps['config_st_instance_type'][int(x)]).cost_per_hour)
-
-        # for v in X[..., 0]:
-        #     instance_type_field = int(v[self.field_to_id['config_st_instance_type']])
-        #     instance_type_string = self.inv_categorical_maps['config_st_instance_type'][instance_type_field]
-        #     instance_type_feature_vector.append(self.instance_type_to_tuple_features_dict[instance_type_string])
-        # instance_type_feature_tensor = torch.DoubleTensor(instance_type_feature_vector)
-
-        # output = torch.cat([X, instance_type_feature_tensor], dim=-1)
-        # return None
-
-        # expanded_X = X.unsqueeze(dim=-2).expand(
-        #     *X.shape[:-1], self.feature_set.shape[0], -1
-        # )
-        # expanded_features = self.feature_set.expand(*expanded_X.shape[:-1], -1)
-        # appended_X = torch.cat([expanded_X, expanded_features], dim=-1)
-        # return appended_X.view(*X.shape[:-2], -1, appended_X.shape[-1])
+import torch
+import random
+import numpy as np
+import botorch
 
 
 class BotorchMOGP(TrialScheduler):
@@ -219,7 +106,6 @@ class BotorchMOGP(TrialScheduler):
         self.categorical_maps['instance_type_family'] = {k: i for i, k in enumerate(map_instance_type_family)}
         self.inv_categorical_maps['instance_type_family'] = {i: k for i, k in enumerate(map_instance_type_family)}
         self.pending_trials = {}
-        # self.fantasising = fantasising
         self.num_mc_samples = num_mc_samples
 
         self.field_to_id = {k: i for i, k in enumerate(self.config_space.keys())}
@@ -243,6 +129,7 @@ class BotorchMOGP(TrialScheduler):
         self.features = features
 
         instance_info = InstanceInfos()
+        self.instance_info = instance_info
 
         self.config_to_tuple_features_dict = {}
         cat_dims = set()
@@ -312,9 +199,12 @@ class BotorchMOGP(TrialScheduler):
             else:
                 suggestion = self.sample_gp()
 
-        self.num_evaluations += 1
-        self.pending_trials[trial_id] = suggestion
-        return TrialSuggestion.start_suggestion(config=suggestion)
+        if suggestion is None:
+            return None
+        else:
+            self.num_evaluations += 1
+            self.pending_trials[trial_id] = suggestion
+            return TrialSuggestion.start_suggestion(config=suggestion)
 
     def sample_random(self) -> Dict:
         sample = {
@@ -334,49 +224,34 @@ class BotorchMOGP(TrialScheduler):
         else:
             return self.sample_random()
 
-    # def append_instance_type_features(self, x):
-    #     instance_type_feature_vector = list()
-    #     for v in x:
-    #         instance_type_field = int(v[self.field_to_id['config_st_instance_type']])
-    #         instance_type_string = self.inv_categorical_maps['config_st_instance_type'][instance_type_field]
-    #         instance_type_feature_vector.append(self.instance_type_to_tuple_features_dict[instance_type_string])
-    #     instance_type_feature_tensor = torch.DoubleTensor(instance_type_feature_vector)
-    #
-    #     output = torch.cat([torch.DoubleTensor(np.stack(x, axis=0)), instance_type_feature_tensor], dim=1)
-    #     return output
-
     def sample_gp(self) -> Union[dict, None]:
         try:
+            fixed_seed = False
+            if fixed_seed:
+                seed = 1
+                torch.manual_seed(seed=seed)
+                np.random.seed(seed)
+                random.seed(seed)
+                botorch.utils.sampling.manual_seed(seed=seed)
+
             x_unnorm = torch.DoubleTensor(np.stack([self.config_to_tuple_features_dict[k] for k in self.x], axis=0))
             x_norm = normalize(x_unnorm, bounds=self.bounds)
-            # x_unnorm = torch.DoubleTensor(np.stack(self.x, axis=0))
 
             y = torch.DoubleTensor(self.y)
-            if self.mode == 'min':
-                # BOTorch assumes maximization while we want to minimize so we negate the y tensor
-                y = -y
+            y = y.log()
 
-            # y = standardize(y)
-            stddim = -1 if y.dim() < 2 else -2
-            y_std = y.std(dim=stddim, keepdim=True)
-            y_std = y_std.where(y_std >= 1e-9, torch.full_like(y_std, 1.0))
-            y_mean = y.mean(dim=stddim, keepdim=True)
-            y = (y - y_mean) / y_std
-
-            # non_cat_indices = list(set(range(len(self.features))) - set(self.cat_dims))
-            # input_transforms = ChainedInputTransform(
-            #     # tf1=CustomFeatures(),
-            #     tf2=Normalize(d=x_unnorm.shape[-1],
-            #                   bounds=self.bounds,
-            #                   indices=non_cat_indices),
-            # )
             input_transforms = None
+            outcome_transform = ChainedOutcomeTransform(
+             # tf1=Log(),
+                tf2=Standardize(m=1),
+            )
 
             if self.deterministic_transform:
                 if len(self.cat_dims) > 0:
                     models = [MixedSingleTaskGP(x_norm, y[:, 0:1],
                                                 cat_dims=self.cat_dims,
-                                                input_transform=input_transforms)]
+                                                input_transform=input_transforms,
+                                                outcome_transform=outcome_transform)]
                 else:
                     raise NotImplementedError
                     # models = [SingleTaskGP(x_norm, y[:, 0:1])]
@@ -384,7 +259,8 @@ class BotorchMOGP(TrialScheduler):
                 if len(self.cat_dims) > 0:
                     models = [MixedSingleTaskGP(x_norm, y[:, i:i + 1],
                                                 cat_dims=self.cat_dims,
-                                                input_transform=input_transforms)
+                                                input_transform=input_transforms,
+                                                outcome_transform=outcome_transform)
                               for i in range(len(self.metrics))]
                 else:
                     raise NotImplementedError
@@ -395,11 +271,56 @@ class BotorchMOGP(TrialScheduler):
             mll = SumMarginalLogLikelihood(model.likelihood, model)
             fit_gpytorch_model(mll)
 
-            sampler = SobolQMCNormalSampler(num_samples=self.num_mc_samples)
+            sampler = SobolQMCNormalSampler(num_samples=self.num_mc_samples, seed=1 if fixed_seed else None)
+
+            run2 = False
+            if run2:
+                if len(self.cat_dims) > 0:
+                    models2 = [MixedSingleTaskGP(x_norm, y[:, i:i + 1],
+                                                    cat_dims=self.cat_dims,
+                                                    input_transform=input_transforms,
+                                                    outcome_transform=outcome_transform)
+                                  for i in range(len(self.metrics))]
+                model2 = ModelListGP(*models2)
+
+                mll2 = SumMarginalLogLikelihood(model2.likelihood, model2)
+                fit_gpytorch_model(mll2)
+
+                sampler2 = SobolQMCNormalSampler(num_samples=self.num_mc_samples, seed=1 if fixed_seed else None)
+
+            def objective_transform(Y: Tensor, X: Optional[Tensor] = None) -> Tensor:
+                # cloning because we are using an in-place operation below
+                X_clone = X.clone()
+                instance_type_int = X_clone[..., self.field_to_id['config_st_instance_type']]
+                instance_cost = instance_type_int.apply_(
+                    lambda x: self.instance_info(
+                        self.inv_categorical_maps['config_st_instance_type'][int(x)]).cost_per_hour)
+
+                y0_unnorm = Y[..., 0]
+                y1_unnorm = y0_unnorm * instance_cost
+
+                assert (y0_unnorm < 0.).sum() == 0
+
+                # if y1_unnorm.shape[-1] == len(self.y):
+                #     y_true = np.array(self.y)
+                #     mask = (y_true[:, 1] != 1.)
+                #     assert np.allclose(
+                #         mask * y0_unnorm.mean(dim=0).numpy(),
+                #         mask * y_true[:, 0],
+                #         rtol=0.5)
+                #     assert np.allclose(
+                #         mask * y1_unnorm.mean(dim=0).numpy(),
+                #         mask * y_true[:, 1],
+                #         rtol=0.5)
+
+                return torch.stack([y0_unnorm, y1_unnorm], dim=-1)
+
             if self.deterministic_transform:
-                objective = MyMCObj(y_mean=y_mean, y_std=y_std, mobo_object=self)
+                objective = GenericMCMultiOutputObjective(
+                    lambda Y, X: objective_transform(Y.exp(), X) * (-1. if self.mode == 'min' else 1.))
             else:
-                objective = None
+                objective = GenericMCMultiOutputObjective(
+                    lambda Y, X: Y.exp() * (-1. if self.mode == 'min' else 1.))
 
             acq_func = qNoisyExpectedHypervolumeImprovement(
                 model=model,
@@ -411,32 +332,41 @@ class BotorchMOGP(TrialScheduler):
                 objective=objective,
                 cache_root=False if self.deterministic_transform else True,
             )
+            if run2:
+                acq_func2 = qNoisyExpectedHypervolumeImprovement(
+                    model=model2,
+                    ref_point=self.ref_point,
+                    X_baseline=x_norm,
+                    # X_baseline=x_unnorm,
+                    prune_baseline=True,  # False if self.deterministic_transform else True,
+                    sampler=sampler2,
+                    objective=GenericMCMultiOutputObjective(lambda x: -x),
+                    cache_root=False,
+                )
 
             # compute all of the points in the config_space still left to consider
             for config in self.x:
                 self.all_configs_vector.pop(config, None)
             x_to_consider = tuple(self.all_configs_vector.keys())
-            # x_to_consider = list(self.all_configs_vector).difference(set(self.x)))
             if len(x_to_consider) == 0:
                 # No more points in the config space to consider, the end of the optimization
                 return None
-            # if not (len(x_to_consider) + len(self.x) == len(self.all_configs_vector)):
-            #     raise Exception('Value has not been removed from self.all_configs_vector correctly.')
             if not (len(self.all_configs_vector) + len(self.x) == self.number_of_combinations):
                 raise Exception('Value has not been removed from self.all_configs_vector correctly.')
 
+            # describe = lambda x: print(
+            #  f"mean: {x.mean()}\nmedian: {x.median()}\nmax: {x.max()}\nmin: {x.min()}\nstd: {x.std()}")
+
             x_to_consider_unnorm = torch.DoubleTensor(np.stack([
                 self.config_to_tuple_features_dict[k] for k in x_to_consider], axis=0))
-            # x_to_consider_unnorm = self.append_instance_type_features(x_to_consider_unnorm)
             x_to_consider_norm = normalize(x_to_consider_unnorm, self.bounds)
             # batch_shape below required to compute the acquisition function over different possible points rather than
             # all of those points jointly
             acq_func_values = acq_func(x_to_consider_norm.reshape(-1, 1, x_to_consider_norm.shape[-1]))
-            # acq_func_values = acq_func(x_to_consider_unnorm.reshape(-1, 1, x_to_consider_unnorm.shape[-1]))
+            if run2:
+                acq_func_values2 = acq_func2(x_to_consider_norm.reshape(-1, 1, x_to_consider_norm.shape[-1]))
             acq_func_idxmax = acq_func_values.argmax()
             candidate = np.array(x_to_consider[acq_func_idxmax], dtype=np.double)
-            # take only the fields contained in self.config_space
-            # candidate = candidate[:len(x_to_consider_unnorm[0]) - len(self.features)]
 
             return decode_config(
                 config_space=self.config_space,
