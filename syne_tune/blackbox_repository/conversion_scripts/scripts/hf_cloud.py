@@ -5,22 +5,24 @@ import numpy as np
 
 from sklearn.neighbors import KNeighborsRegressor
 
-from syne_tune.blackbox_repository import load, BlackboxOffline, add_surrogate, serialize
+from syne_tune.blackbox_repository import load, add_surrogate, serialize
 from syne_tune.blackbox_repository.blackbox import Blackbox
 import syne_tune.config_space as sp
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
-from syne_tune.util import s3_experiment_path
 from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
 from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
 import syne_tune.experiments
 
 
 METRIC_VALID_ERROR = 'metric_training_loss'
-METRIC_TIME_THIS_RESOURCE = 'metric_train_runtime'
 
-SOURCE_SYNE_TUNE_JOB_NAMES = (
+# This is cumulative time required for consuming the resource up until this point in training.
+METRIC_TIME_CUMULATIVE_RESOURCE = 'metric_train_runtime'
+
+LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES = (
     'loss-lr-wd-bs-2-2022-02-07-23-13-30-781',
 )
+SPEED_SYNE_TUNE_JOB_NAME = 'speed-bs-it-2022-02-07-23-12-47-916'
 
 BLACKBOX_NAME = 'hf-cloud'
 
@@ -32,20 +34,17 @@ class HFCloudBlackbox(Blackbox):
     def __init__(self, bb):
         self.configuration_space = bb.configuration_space
         self.objectives_names = bb.objectives_names + ["cost"]
-        # TODO N is the minimum value of any of the runs, so setting this ensures that none fail
-        # TODO Do I need this?
-        # N = bb.df.reset_index().groupby('trial_id').step.max().min()
-        # bb.fidelity_values = list(range(1, N + 1))  # FIXME HACK
         super(HFCloudBlackbox, self).__init__(
             configuration_space=self.configuration_space,
             fidelity_space=bb.fidelity_space,
             fidelity_values=bb.fidelity_values,
             objectives_names=self.objectives_names,
         )
-        self.bb = add_surrogate(bb, surrogate=KNeighborsRegressor(n_neighbors=3),)
+        self.bb = add_surrogate(bb, surrogate=KNeighborsRegressor(n_neighbors=3, weights='distance'),)
 
         assert len(bb.df.config_st_instance_type.unique()) == 1, \
             "All of the trials should have been performed on the same instance type."
+        # Sets the baseline_instance_type to the single instance type all of the loss values were collected for.
         baseline_instance_type = bb.df.config_st_instance_type.unique()[0]
         self.instance_speed_cost_dict = instance_speed_cost(baseline_instance_type=baseline_instance_type)
         self.configuration_space["instance_type"] = sp.choice(np.unique(np.array(list(self.instance_speed_cost_dict.keys()))[:, 0]).tolist())
@@ -64,15 +63,14 @@ class HFCloudBlackbox(Blackbox):
         res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
 
         if fidelity is not None:
-            adjusted_time = res[METRIC_TIME_THIS_RESOURCE] * relative_time_factor
+            adjusted_time = res[METRIC_TIME_CUMULATIVE_RESOURCE] * relative_time_factor
             return {
                 METRIC_VALID_ERROR: res[METRIC_VALID_ERROR],
                 "metric_train_runtime": adjusted_time,
                 "metric_cost": adjusted_time * cost_per_second,
             }
         else:
-            index_time = [i for i, x in enumerate(self.objectives_names) if x == METRIC_TIME_THIS_RESOURCE][0]
-            # add relative time
+            index_time = [i for i, x in enumerate(self.objectives_names) if x == METRIC_TIME_CUMULATIVE_RESOURCE][0]
             res[:, index_time] *= relative_time_factor
 
             # add cost which runtime seconds time second cost
@@ -81,45 +79,40 @@ class HFCloudBlackbox(Blackbox):
 
             return res
 
-    # def hyperparameter_objectives_values(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    #     # TODO somehow avoid redefining it this way and handle this via inheritance?
-    #     return self.bb.hyperparameter_objectives_values()
-
 
 def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, float]]:
     """
-    :param type:
-    :return: dictionary from instance to relative-time and cost per-second instance.
+    :param baseline_instance_type: The baseline instance type that was used to collect the loss functions for the
+      blackbox.
+    :return: dictionary from tuple (instance_type, batch_size) to the tuple
+      (relative-time, cost-per-second of the chosen instance type).
     """
     # gets instance dollar-cost
     instance_info = InstanceInfos()
     instance_hourly_cost = {instance: instance_info(instance).cost_per_hour for instance in instance_info.instances}
 
-    # gets instance speed
-    csv_path = Path(__file__).parent / f"hf-cloud-instance-speed.csv.zip"
-    if csv_path.exists():
-        df = pd.read_csv(csv_path)
-    else:
-        df = pd.read_csv(s3_experiment_path(tuner_name='speed-bs-it-2022-02-07-23-12-47-916') + '/train_runtime.csv')
-        # df = syne_tune.experiments.load_experiment(tuner_job_name).results
-        df.to_csv(csv_path)
-
-    time_col = 'train_runtime'
-
-    compute_config_params = ('config_st_instance_type',)
-    model_config_params_affecting_performance = ('config_per_device_train_batch_size',)
+    df = syne_tune.experiments.load_experiment(SPEED_SYNE_TUNE_JOB_NAME).results
+    time_col = 'time_per_gradient_step'
+    df[time_col] = df.st_worker_time / df.step
 
     # gets time per batch relative to the time for a baseline instance
     # taking the shortest train_runtime per instance-type which most of the time corresponds to the largest batch_size
     time_per_instance = (
         df.groupby(['config_st_instance_type', 'config_per_device_train_batch_size'])[time_col].mean())
     relative_time_per_instance = time_per_instance / time_per_instance.loc[baseline_instance_type]
-    return {
+    output = {
         # gets the cost per second
-        (instance, batch_size) : (relative_time_per_instance.loc[(instance, batch_size)],
-                                  instance_hourly_cost[instance] / 3600.)
+        (instance, batch_size): (relative_time_per_instance.loc[(instance, batch_size)],
+                                 instance_hourly_cost[instance] / 3600.)
         for (instance, batch_size) in relative_time_per_instance.index
     }
+
+    # A provisional fix because these two records for some reason are not present in the SPEED_SYNE_TUNE_JOB_NAME
+    # results, most likely the jobs executing these failed and the results were never recorded
+    output[('ml.g4dn.4xlarge', 4.)] = (1.0, 0.0004683333333333333)
+    output[('ml.g4dn.4xlarge', 16.)] = (1.0, 0.0004683333333333333)
+
+    return output
 
 
 def import_hf_cloud():
@@ -131,16 +124,14 @@ def import_hf_cloud():
 def serialize_hf_cloud():
     dfs_to_concat = list()
     trial_id_max = -1
-    for tuner_job_name in SOURCE_SYNE_TUNE_JOB_NAMES:
+    for tuner_job_name in LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES:
         df_temp = syne_tune.experiments.load_experiment(tuner_job_name).results
         df_temp['trial_id'] += trial_id_max + 1
         trial_id_max = df_temp['trial_id'].max()
         dfs_to_concat.append(df_temp)
     df = pd.concat(dfs_to_concat).reset_index()
 
-    # Drop trials which have duplicate entries.
-    # The reason for why some trials have these duplicates is not understood.
-    # Doing this to ensure correctness.
+    # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
     temp = df.groupby(['trial_id', 'step']).loss.count().reset_index()
     trial_ids_to_be_deleted = temp[temp.loss > 1].trial_id.unique()
 
@@ -158,11 +149,12 @@ def serialize_hf_cloud():
         'config_weight_decay': 'weight_decay',
     }
     df = df.rename(columns=columns_to_rename)
-    # df = df.dropna(subset=['config_per_device_train_batch_size'])
-
 
     configuration_space = dict(
-        per_device_train_batch_size=sp.finrange(4.0, 88.0, 22),  # [4, 8, ..., 88]
+        # We are setting batch_size to the values [4, 8, 12, 16] because that's the overlap of the
+        # per_device_train_batch_size field in the search spaces used for A) training curves/loss function values
+        # generation, and B) relative training speed generation.
+        per_device_train_batch_size=sp.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
         learning_rate=sp.loguniform(1e-7, 1e-4),
         weight_decay=sp.loguniform(1e-6, 1e-2),
     )
@@ -170,6 +162,7 @@ def serialize_hf_cloud():
     # Changing steps to contiguous integers allows us to run multi-fidelity algorithms like ASHA easily.
     df.step = (df.step / 100).astype(np.int64)
 
+    # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
     N = df.reset_index().groupby('trial_id').step.max().min()
     fidelity_values = list(range(1, N+1))
     fidelity_space = dict(

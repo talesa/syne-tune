@@ -135,12 +135,11 @@ def serialize_hf_cloud_speed():
 
     instance_info = InstanceInfos()
 
-    number_of_samples_processed = \
-        (dfg.step.max() - dfg.step.min()) * \
-        dfg.config_per_device_train_batch_size.max() * \
-        dfg.config_st_instance_type.max().map(lambda x: instance_info(x).num_gpu)
-
-    samples_processed_per_second = number_of_samples_processed / (dfg.st_worker_time.max() - dfg.st_worker_time.min())
+    samples_processed_per_second = (
+            dfg.step.max()
+            * dfg.config_per_device_train_batch_size.max()
+            * dfg.config_st_instance_type.max().map(lambda x: instance_info(x).num_gpu)
+            / dfg.st_worker_time.max())
 
     b = pd.concat([
         samples_processed_per_second,
@@ -151,10 +150,6 @@ def serialize_hf_cloud_speed():
         dfg.st_worker_cost.max(),
     ], axis=1)
     b.columns = ['samples_processed_per_second'] + list(b.columns)[1:]
-    # TODO investigate where are the NaNs coming from
-    #  - probably some of the runs not having the measurement for at least two steps - having too large batch size to
-    #    record 200.
-    #  - do I have NaNs also in the notebook?
 
     b = b.dropna(subset=['samples_processed_per_second'], how='all')
 
@@ -180,11 +175,8 @@ def serialize_hf_cloud_speed():
 
     configuration_space = dict(
         config_st_instance_type=sp.choice(dfrt.config_st_instance_type.unique().tolist()),
-        # config_per_device_train_batch_size=sp.finrange(8.0, 56.0, 7),  # {8.0, 16.0, 24.0, 32.0, 40.0, 48.0}
         config_per_device_train_batch_size=sp.finrange(8.0, 48.0, 6),  # {8.0, 16.0, 24.0, 32.0, 40.0, 48.0}
         config_dataloader_num_workers=sp.finrange(0, 1, 2),  # [0, 1]
-        # config_per_device_train_batch_size=sp.finrange(4.0, 88.0, 22),  # [4, 8, ..., 88]
-        # config_dataloader_num_workers=sp.finrange(0, 2, 3),  # [0, 1, 2]
     )
 
     serialize(

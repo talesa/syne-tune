@@ -18,7 +18,7 @@ if __name__ == '__main__':
     blackbox = bb_dict["imdb"]
 
     # simulating HPO
-    n_workers = 1
+    n_workers = 2
     metric = "metric_training_loss"
     elapsed_time_attr = 'metric_train_runtime'
 
@@ -26,9 +26,6 @@ if __name__ == '__main__':
         blackbox=blackbox,
         elapsed_time_attr=elapsed_time_attr,
     )
-
-    # This is required to specify which of the
-    backend.blackbox.configuration_space['per_device_train_batch_size'] = sp.choice([4, 8, 12, 16])
 
     # Random search without stopping
     # scheduler = RandomSearch(
@@ -49,7 +46,7 @@ if __name__ == '__main__':
         random_seed=31415927
     )
 
-    stop_criterion = StoppingCriterion(max_wallclock_time=7200)
+    stop_criterion = StoppingCriterion(max_wallclock_time=5000)
 
     # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
     tuner = Tuner(
