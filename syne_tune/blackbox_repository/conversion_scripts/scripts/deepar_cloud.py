@@ -24,17 +24,17 @@ LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES = (
 )
 SPEED_SYNE_TUNE_JOB_NAME = 'speed-bs-it-2022-02-07-23-12-47-916'
 
-BLACKBOX_NAME = 'hf-cloud'
+BLACKBOX_NAME = 'deepar-cloud'
 
 
-class HFCloudBlackbox(Blackbox):
+class DeepARCloudBlackbox(Blackbox):
     """
     Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
     """
     def __init__(self, bb):
         self.configuration_space = bb.configuration_space
         self.objectives_names = bb.objectives_names + ["cost"]
-        super(HFCloudBlackbox, self).__init__(
+        super(DeepARCloudBlackbox, self).__init__(
             configuration_space=self.configuration_space,
             fidelity_space=bb.fidelity_space,
             fidelity_values=bb.fidelity_values,
@@ -47,7 +47,8 @@ class HFCloudBlackbox(Blackbox):
         # Sets the baseline_instance_type to the single instance type all of the loss values were collected for.
         baseline_instance_type = bb.df.config_st_instance_type.unique()[0]
         self.instance_speed_cost_dict = instance_speed_cost(baseline_instance_type=baseline_instance_type)
-        self.configuration_space["instance_type"] = sp.choice(np.unique(np.array(list(self.instance_speed_cost_dict.keys()))[:, 0]).tolist())
+        self.configuration_space["instance_type"] = sp.choice(
+            np.unique(np.array(list(self.instance_speed_cost_dict.keys()))[:, 0]).tolist())
 
     def _objective_function(
             self,
@@ -117,7 +118,7 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, f
 
 def import_hf_cloud():
     bb = load("hf-cloud")
-    bb_dict = {'imdb': HFCloudBlackbox(bb=bb['imdb'])}
+    bb_dict = {'imdb': DeepARCloudBlackbox(bb=bb['imdb'])}
     return bb_dict
 
 

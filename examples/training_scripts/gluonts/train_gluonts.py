@@ -102,10 +102,6 @@ if __name__ == '__main__':
     freq = dataset.metadata.freq
     context_length = prediction_length
 
-    # TODO remove me
-    prediction_length = 48
-    context_length = 72
-
     # print(f'mx.context.num_gpus(): {mx.context.num_gpus()}')
     # # print(f'torch.cuda.is_available(): {torch.cuda.is_available()}')
     #
