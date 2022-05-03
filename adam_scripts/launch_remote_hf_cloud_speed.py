@@ -39,8 +39,14 @@ if __name__ == '__main__':
 
         ('instance_type_family', 'num_cpu', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
         ('instance_type_family', 'cost_per_hour', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
+
+        # ('instance_type_family', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
+        # ('instance_type_family', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
+        #
+        # ('instance_type_family', 'config_per_device_train_batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
+        # ('instance_type_family', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
     )
-    deterministic_transform = 1
+    deterministic_transform = 0
 
     experiments_names = []
     for features in feature_combinations:
@@ -51,7 +57,7 @@ if __name__ == '__main__':
             entry_point="launch_hf_cloud_speed_simulated.py",
             source_dir=str(Path(__file__).parent),
             checkpoint_s3_uri=s3_experiment_path(experiment_name=experiment_tag),
-            instance_type="ml.c4.xlarge",
+            instance_type="ml.c4.2xlarge",
             instance_count=1,
             py_version="py38",
             framework_version='1.10.0',

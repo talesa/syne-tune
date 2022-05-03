@@ -1,21 +1,13 @@
 import logging
-import numpy as np
-import pandas as pd
 import syne_tune.config_space as sp
 
-from syne_tune.blackbox_repository import load, add_surrogate
-from syne_tune.blackbox_repository.blackbox_tabular import BlackboxTabular
 from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_cloud import import_hf_cloud
-from syne_tune.blackbox_repository.simulated_tabular_backend import BlackboxRepositoryBackend, UserBlackboxBackend
-
-from sklearn.neighbors import KNeighborsRegressor
+from syne_tune.blackbox_repository.simulated_tabular_backend import UserBlackboxBackend
 
 from syne_tune.backend.simulator_backend.simulator_callback import SimulatorCallback
 from syne_tune.optimizer.baselines import ASHA, RandomSearch
 from syne_tune.stopping_criterion import StoppingCriterion
 from syne_tune.tuner import Tuner
-
-import syne_tune.experiments
 
 
 if __name__ == '__main__':
@@ -35,6 +27,7 @@ if __name__ == '__main__':
         elapsed_time_attr=elapsed_time_attr,
     )
 
+    # This is required to specify which of the
     backend.blackbox.configuration_space['per_device_train_batch_size'] = sp.choice([4, 8, 12, 16])
 
     # Random search without stopping

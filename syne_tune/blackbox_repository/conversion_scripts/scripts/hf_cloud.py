@@ -17,10 +17,8 @@ import syne_tune.experiments
 
 METRIC_VALID_ERROR = 'metric_training_loss'
 METRIC_TIME_THIS_RESOURCE = 'metric_train_runtime'
-# RESOURCE_ATTR = 'hp_epoch'
 
 SOURCE_SYNE_TUNE_JOB_NAMES = (
-    # 'loss-lr-wd-bs-2022-02-04-12-09-26-911',  # Old schema, i.e. names of the fields, don't use.
     'loss-lr-wd-bs-2-2022-02-07-23-13-30-781',
 )
 
@@ -35,8 +33,9 @@ class HFCloudBlackbox(Blackbox):
         self.configuration_space = bb.configuration_space
         self.objectives_names = bb.objectives_names + ["cost"]
         # TODO N is the minimum value of any of the runs, so setting this ensures that none fail
-        N = bb.df.reset_index().groupby('trial_id').step.max().min()
-        bb.fidelity_values = list(range(1, N + 1))  # FIXME HACK
+        # TODO Do I need this?
+        # N = bb.df.reset_index().groupby('trial_id').step.max().min()
+        # bb.fidelity_values = list(range(1, N + 1))  # FIXME HACK
         super(HFCloudBlackbox, self).__init__(
             configuration_space=self.configuration_space,
             fidelity_space=bb.fidelity_space,
@@ -82,9 +81,9 @@ class HFCloudBlackbox(Blackbox):
 
             return res
 
-    def hyperparameter_objectives_values(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        # TODO somehow avoid redefining it this way and handle this via inheritance?
-        return self.bb.hyperparameter_objectives_values()
+    # def hyperparameter_objectives_values(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    #     # TODO somehow avoid redefining it this way and handle this via inheritance?
+    #     return self.bb.hyperparameter_objectives_values()
 
 
 def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, float]]:
@@ -112,7 +111,6 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, f
 
     # gets time per batch relative to the time for a baseline instance
     # taking the shortest train_runtime per instance-type which most of the time corresponds to the largest batch_size
-    # TODO if you want to run higher batch size (ones that you could run on larger instance types than g5) use gradient accumulation
     time_per_instance = (
         df.groupby(['config_st_instance_type', 'config_per_device_train_batch_size'])[time_col].mean())
     relative_time_per_instance = time_per_instance / time_per_instance.loc[baseline_instance_type]
@@ -152,7 +150,6 @@ def serialize_hf_cloud():
         "All of the trials should have been performed on the same instance type."
 
     # Rename some columns
-    # TODO if we regenerate the dataset some renaming will change due to updates in the generation code
     columns_to_rename = {
         'loss': 'metric_training_loss',
         'st_worker_time': 'metric_train_runtime',  # TODO change this to train_runtime outputed by huggingface
@@ -163,23 +160,20 @@ def serialize_hf_cloud():
     df = df.rename(columns=columns_to_rename)
     # df = df.dropna(subset=['config_per_device_train_batch_size'])
 
-    # Changing steps to contiguous integers allows us to run multi-fidelity algorithms like ASHA easily.
-    df.step = (df.step / 100).astype(np.int64)
 
-    # TODO modify the per_device_train_batch_size to a distribution that can take advantage of BO
     configuration_space = dict(
         per_device_train_batch_size=sp.finrange(4.0, 88.0, 22),  # [4, 8, ..., 88]
         learning_rate=sp.loguniform(1e-7, 1e-4),
         weight_decay=sp.loguniform(1e-6, 1e-2),
     )
 
-    # TODO shouldn't fidelity_values be implied given fidelity_space?
+    # Changing steps to contiguous integers allows us to run multi-fidelity algorithms like ASHA easily.
+    df.step = (df.step / 100).astype(np.int64)
+
     N = df.reset_index().groupby('trial_id').step.max().min()
     fidelity_values = list(range(1, N+1))
     fidelity_space = dict(
         step=sp.choice(fidelity_values),
-        # TODO What to do since “step” (number of gradient updates) implicitly defines different fidelity measures for different batch_sizes?
-        # step=sp.finrange(lower=100, upper=500, size=5),  # [100, 200, 300, 400, 500]
     )
 
     serialize(
