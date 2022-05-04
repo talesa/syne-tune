@@ -32,6 +32,7 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--iters', type=int, default=10)
     parser.add_argument('-mc', '--max_cost', type=float, default=20.)
     parser.add_argument('-dt', '--deterministic_transform', type=int, default=0)
+    parser.add_argument('-eo', '--exclude_oom_runs', type=int, default=0)
     parser.add_argument('-s', '--searcher', type=str, default='mobo')
 
     args, _ = parser.parse_known_args()
@@ -69,6 +70,7 @@ if __name__ == '__main__':
                 ref_point=[5., 5.],  # since the objectives are standardized (mean=0, std=1)
                 features=args.features,
                 deterministic_transform=args.deterministic_transform,
+                exclude_oom_runs=args.exclude_oom_runs,
             )
         elif args.searcher == 'random':
             scheduler = RandomSearch(
@@ -79,7 +81,8 @@ if __name__ == '__main__':
 
         stop_criterion = StoppingCriterion(
             max_cost=args.max_cost,
-            max_num_trials_finished=168,
+            max_num_trials_finished=132,  # OOM runs excluded
+            # max_num_trials_finished=168,  # OOM runs included
         )
 
         # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)

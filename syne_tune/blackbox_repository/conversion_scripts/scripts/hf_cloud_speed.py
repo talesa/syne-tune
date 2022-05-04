@@ -52,6 +52,14 @@ class HFCloudSpeedBlackbox(Blackbox):
     """
     Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
     """
+    per_device_train_batch_size_limits = {
+        'g4dn': 32,
+        'g5': 52,
+        'p2': 24,
+        'p3': 32,
+        'p3dn': 68,
+        'p4d': 88,
+    }
 
     def __init__(self, bb):
         super(HFCloudSpeedBlackbox, self).__init__(
@@ -72,15 +80,6 @@ class HFCloudSpeedBlackbox(Blackbox):
         # p3   V100 16GB          32
         # p3dn V100 32GB          68
         # p4d  A100 40GB          88
-
-        self.per_device_train_batch_size_limits = {
-            'g4dn': 32,
-            'g5': 52,
-            'p2': 24,
-            'p3': 32,
-            'p3dn': 68,
-            'p4d': 88,
-        }
 
     def _objective_function(
             self,

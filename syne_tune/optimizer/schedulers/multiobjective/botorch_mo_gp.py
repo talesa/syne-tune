@@ -15,6 +15,8 @@ import sys
 from collections import defaultdict
 from typing import Dict, Optional, List, Union, Sequence
 
+from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_cloud_speed import HFCloudSpeedBlackbox
+
 sys.path.insert(0, '/Users/awgol/code/botorch/')
 
 from gpytorch.utils.errors import NotPSDError
@@ -63,6 +65,7 @@ class BotorchMOGP(TrialScheduler):
             num_mc_samples: int = 100,
             features: Sequence = tuple(),
             deterministic_transform: bool = False,
+            exclude_oom_runs: bool = False,
     ):
         """
         :param config_space:
@@ -107,12 +110,18 @@ class BotorchMOGP(TrialScheduler):
         self.inv_categorical_maps['instance_type_family'] = {i: k for i, k in enumerate(map_instance_type_family)}
         self.pending_trials = {}
         self.num_mc_samples = num_mc_samples
+        self.exclude_oom_runs = exclude_oom_runs
 
         self.field_to_id = {k: i for i, k in enumerate(self.config_space.keys())}
 
         # TODO how to generate all values from a discrete hp config like finrange?
         #  Then we could use itertools.product rather than sampling which is very silly
         all_possible_configs = set(tuple(v.sample() for v in self.config_space.values()) for _ in range(10000))
+        if self.exclude_oom_runs:
+            # remove configs that fail due to OOM
+            all_possible_configs = set(
+                x for x in all_possible_configs
+                if x[1] <= HFCloudSpeedBlackbox.per_device_train_batch_size_limits[x[0].split('.')[1]])
         all_configs_dicts = tuple({k: v for k, v in zip(self.config_space.keys(), config)}
                                   for config in all_possible_configs)
         self.all_configs_vector = dict.fromkeys(
@@ -207,22 +216,36 @@ class BotorchMOGP(TrialScheduler):
             return TrialSuggestion.start_suggestion(config=suggestion)
 
     def sample_random(self) -> Dict:
-        sample = {
-            k: v.sample()
-            if isinstance(v, cs.Domain) else v
-            for k, v in self.config_space.items()
-        }
-        sample_encoded = encode_config(
-            config=sample,
-            config_space=self.config_space,
-            categorical_maps=self.categorical_maps,
-            cat_to_onehot=False,
-            normalize_bounded_domains=False,
-        )
-        if sample_encoded not in self.x:
-            return sample
+        if self.exclude_oom_runs:
+            idx = np.random.randint(0, len(self.all_configs_vector))
+            sample_encoded = list(self.all_configs_vector.keys())[idx]
+            self.all_configs_vector.pop(sample_encoded)
+            if sample_encoded in self.x:
+                raise Exception('DID NOT EXPECT THIS')
+            return decode_config(
+                encoded_vector=sample_encoded,
+                config_space=self.config_space,
+                inv_categorical_maps=self.inv_categorical_maps,
+                cat_to_onehot=False,
+                normalize_bounded_domains=False,
+            )
         else:
-            return self.sample_random()
+            sample = {
+                k: v.sample()
+                if isinstance(v, cs.Domain) else v
+                for k, v in self.config_space.items()
+            }
+            sample_encoded = encode_config(
+                config=sample,
+                config_space=self.config_space,
+                categorical_maps=self.categorical_maps,
+                cat_to_onehot=False,
+                normalize_bounded_domains=False,
+            )
+            if sample_encoded not in self.x:
+                return sample
+            else:
+                return self.sample_random()
 
     def sample_gp(self) -> Union[dict, None]:
         try:
