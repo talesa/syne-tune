@@ -7,7 +7,7 @@ from sklearn.neighbors import KNeighborsRegressor
 
 from syne_tune.blackbox_repository import load, add_surrogate, serialize
 from syne_tune.blackbox_repository.blackbox import Blackbox
-import syne_tune.config_space as sp
+import syne_tune.config_space as cs
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
 from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
@@ -20,7 +20,12 @@ METRIC_VALID_ERROR = 'metric_training_loss'
 METRIC_TIME_CUMULATIVE_RESOURCE = 'metric_train_runtime'
 
 LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES = (
-    'loss-lr-wd-bs-2-2022-02-07-23-13-30-781',
+    'deepar-curves-2022-04-25-10-46-32-616',
+    'deepar-curves-2-2022-04-25-12-31-30-154',
+    'deepar-curves-3-2022-04-25-12-32-14-346',
+#     'deepar-curves-4-2022-05-04-08-53-23-418',
+#     # There was no deepar-curves-5
+#     'deepar-curves-6-2022-05-04-08-54-35-102',
 )
 SPEED_SYNE_TUNE_JOB_NAME = 'speed-bs-it-2022-02-07-23-12-47-916'
 
@@ -29,7 +34,7 @@ BLACKBOX_NAME = 'deepar-cloud'
 
 class DeepARCloudBlackbox(Blackbox):
     """
-    Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
+    Dataset generated using adam_scripts/
     """
     def __init__(self, bb):
         self.configuration_space = bb.configuration_space
@@ -116,13 +121,13 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, f
     return output
 
 
-def import_hf_cloud():
-    bb = load("hf-cloud")
-    bb_dict = {'imdb': DeepARCloudBlackbox(bb=bb['imdb'])}
+def import_deepar_cloud():
+    bb = load("deepar-cloud")
+    bb_dict = {'electricity': DeepARCloudBlackbox(bb=bb['electricity'])}
     return bb_dict
 
 
-def serialize_hf_cloud():
+def serialize_deepar_cloud():
     dfs_to_concat = list()
     trial_id_max = -1
     for tuner_job_name in LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES:
@@ -133,46 +138,40 @@ def serialize_hf_cloud():
     df = pd.concat(dfs_to_concat).reset_index()
 
     # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
-    temp = df.groupby(['trial_id', 'step']).loss.count().reset_index()
-    trial_ids_to_be_deleted = temp[temp.loss > 1].trial_id.unique()
+    temp = df.groupby(['trial_id', 'st_worker_iter']).mean_wQuantileLoss.count().reset_index()
 
-    df.drop(df.index[df['trial_id'].isin(trial_ids_to_be_deleted)], inplace=True)
+    trial_ids_with_duplicates = set(temp[temp.mean_wQuantileLoss > 1].trial_id.unique())
+    trial_ids_with_all_iters = set(df[df.epoch_no == 100].trial_id.unique())
 
-    assert len(df.config_st_instance_type.unique()) == 1, \
-        "All of the trials should have been performed on the same instance type."
+    trial_ids_to_keep = (trial_ids_with_all_iters.difference(trial_ids_with_duplicates))
+
+    df.drop(df.index[~df['trial_id'].isin(trial_ids_to_keep)], inplace=True)
 
     # Rename some columns
-    columns_to_rename = {
-        'loss': 'metric_training_loss',
-        'st_worker_time': 'metric_train_runtime',  # TODO change this to train_runtime outputed by huggingface
-        'config_per_device_train_batch_size': 'per_device_train_batch_size',
-        'config_learning_rate': 'learning_rate',
-        'config_weight_decay': 'weight_decay',
-    }
+    columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
+    columns_to_rename.update({
+        'st_worker_time': 'metric_train_runtime',
+        'st_worker_iter': 'step',
+    })
     df = df.rename(columns=columns_to_rename)
 
-    configuration_space = dict(
-        # We are setting batch_size to the values [4, 8, 12, 16] because that's the overlap of the
-        # per_device_train_batch_size field in the search spaces used for A) training curves/loss function values
-        # generation, and B) relative training speed generation.
-        per_device_train_batch_size=sp.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
-        learning_rate=sp.loguniform(1e-7, 1e-4),
-        weight_decay=sp.loguniform(1e-6, 1e-2),
-    )
-
-    # Changing steps to contiguous integers allows us to run multi-fidelity algorithms like ASHA easily.
-    df.step = (df.step / 100).astype(np.int64)
+    configuration_space = {
+        "lr": cs.loguniform(1e-4, 1e-1),
+        "batch_size": cs.logfinrange(8, 128, 5, cast_int=True),  # cs.choice([8, 16, 32, 64, 128]),
+        "num_cells": cs.randint(lower=1, upper=200),
+        "num_layers": cs.randint(lower=1, upper=4),
+    }
 
     # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
     N = df.reset_index().groupby('trial_id').step.max().min()
-    fidelity_values = list(range(1, N+1))
+    fidelity_values = list(range(N+1))
     fidelity_space = dict(
-        step=sp.choice(fidelity_values),
+        step=cs.choice(fidelity_values),
     )
 
     serialize(
         {
-            'imdb': BlackboxOffline(
+            'electricity': BlackboxOffline(
                 df_evaluations=df,
                 configuration_space=configuration_space,
                 fidelity_space=fidelity_space,
@@ -184,10 +183,10 @@ def serialize_hf_cloud():
     )
 
 
-def generate_hf_cloud(s3_root: Optional[str] = None):
-    serialize_hf_cloud()
+def generate_deepar_cloud(s3_root: Optional[str] = None):
+    serialize_deepar_cloud()
     upload(name=BLACKBOX_NAME, s3_root=s3_root)
 
 
 if __name__ == '__main__':
-    generate_hf_cloud()
+    generate_deepar_cloud()
