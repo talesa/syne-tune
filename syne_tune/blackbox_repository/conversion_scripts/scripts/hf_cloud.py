@@ -134,7 +134,6 @@ def serialize_hf_cloud():
     # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
     temp = df.groupby(['trial_id', 'step']).loss.count().reset_index()
     trial_ids_to_be_deleted = temp[temp.loss > 1].trial_id.unique()
-
     df.drop(df.index[df['trial_id'].isin(trial_ids_to_be_deleted)], inplace=True)
 
     assert len(df.config_st_instance_type.unique()) == 1, \
@@ -143,7 +142,7 @@ def serialize_hf_cloud():
     # Rename some columns
     columns_to_rename = {
         'loss': 'metric_training_loss',
-        'st_worker_time': 'metric_train_runtime',  # TODO change this to train_runtime outputed by huggingface
+        'st_worker_time': 'metric_train_runtime',
         'config_per_device_train_batch_size': 'per_device_train_batch_size',
         'config_learning_rate': 'learning_rate',
         'config_weight_decay': 'weight_decay',

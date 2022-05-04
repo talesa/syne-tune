@@ -6,7 +6,6 @@ from syne_tune.optimizer.baselines import ZeroShotTransfer
 from syne_tune.optimizer.schedulers.hyperband import HyperbandScheduler
 from syne_tune.optimizer.schedulers.fifo import FIFOScheduler
 from syne_tune.optimizer.schedulers.median_stopping_rule import MedianStoppingRule
-from syne_tune.optimizer.schedulers.multiobjective.botorch_mo_gp import BotorchMOGP
 from syne_tune.optimizer.schedulers.transfer_learning.bounding_box import BoundingBox
 from syne_tune.optimizer.schedulers.searchers.regularized_evolution import RegularizedEvolution
 from syne_tune.optimizer.schedulers.transfer_learning.quantile_based.quantile_based_searcher import \
