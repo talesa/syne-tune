@@ -34,7 +34,6 @@ class BlackboxSurrogate(Blackbox):
             max_fit_samples: Optional[int] = None,
             name: Optional[str] = None,
             hps_to_exclude: Optional[Sequence[str]] = tuple(),
-            hps_to_not_mix = None,
     ):
         """
         Fits a blackbox surrogates that can be evaluated anywhere, which can be useful for supporting

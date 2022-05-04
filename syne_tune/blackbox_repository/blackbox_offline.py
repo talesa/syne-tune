@@ -183,6 +183,8 @@ def deserialize(path: str) -> Union[Dict[str, BlackboxOffline], BlackboxOffline]
     for k, v in fidelity_space.items():
         if isinstance(v, cs.Categorical):
             fidelity_values = v.categories
+        elif isinstance(v, cs.FiniteRange):
+            fidelity_values = list(set(v.sample(size=100*v.size)))
         else:
             raise NotImplementedError(f"The automatic conversion of config_space class {v} to the fidelity_space is not"
                                       f"implemented yet.")

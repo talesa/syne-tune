@@ -42,12 +42,12 @@ class HFCloudBlackbox(Blackbox):
         )
         self.bb = add_surrogate(bb, surrogate=KNeighborsRegressor(n_neighbors=3, weights='distance'),)
 
-        assert len(bb.df.config_st_instance_type.unique()) == 1, \
+        assert len(bb.df.reset_index().st_instance_type.unique()) == 1, \
             "All of the trials should have been performed on the same instance type."
         # Sets the baseline_instance_type to the single instance type all of the loss values were collected for.
-        baseline_instance_type = bb.df.config_st_instance_type.unique()[0]
+        baseline_instance_type = bb.df.reset_index().st_instance_type.unique()[0]
         self.instance_speed_cost_dict = instance_speed_cost(baseline_instance_type=baseline_instance_type)
-        self.configuration_space["instance_type"] = sp.choice(np.unique(np.array(list(self.instance_speed_cost_dict.keys()))[:, 0]).tolist())
+        # self.configuration_space["instance_type"] = sp.choice(np.unique(np.array(list(self.instance_speed_cost_dict.keys()))[:, 0]).tolist())
 
     def _objective_function(
             self,
@@ -55,9 +55,9 @@ class HFCloudBlackbox(Blackbox):
             fidelity: Optional[Dict] = None,
             seed: Optional[int] = None
     ) -> Dict:
-        if 'instance_type' not in configuration:
+        if 'st_instance_type' not in configuration:
             raise ValueError(f'No instance_type provided in the configuration: {configuration}')
-        instance_type = configuration.pop('instance_type')
+        instance_type = configuration['st_instance_type']
         relative_time_factor, cost_per_second = self.instance_speed_cost_dict[(instance_type, configuration['per_device_train_batch_size'])]
 
         res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
@@ -115,12 +115,6 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, f
     return output
 
 
-def import_hf_cloud():
-    bb = load("hf-cloud")
-    bb_dict = {'imdb': HFCloudBlackbox(bb=bb['imdb'])}
-    return bb_dict
-
-
 def serialize_hf_cloud():
     dfs_to_concat = list()
     trial_id_max = -1
@@ -140,14 +134,14 @@ def serialize_hf_cloud():
         "All of the trials should have been performed on the same instance type."
 
     # Rename some columns
-    columns_to_rename = {
+    columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
+    columns_to_rename.update({
         'loss': 'metric_training_loss',
         'st_worker_time': 'metric_train_runtime',
-        'config_per_device_train_batch_size': 'per_device_train_batch_size',
-        'config_learning_rate': 'learning_rate',
-        'config_weight_decay': 'weight_decay',
-    }
+    })
     df = df.rename(columns=columns_to_rename)
+
+    df_speed = syne_tune.experiments.load_experiment(SPEED_SYNE_TUNE_JOB_NAME).results
 
     configuration_space = dict(
         # We are setting batch_size to the values [4, 8, 12, 16] because that's the overlap of the
@@ -156,16 +150,16 @@ def serialize_hf_cloud():
         per_device_train_batch_size=sp.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
         learning_rate=sp.loguniform(1e-7, 1e-4),
         weight_decay=sp.loguniform(1e-6, 1e-2),
+        st_instance_type=sp.choice(df_speed.config_st_instance_type.unique())
     )
 
-    # Changing steps to contiguous integers allows us to run multi-fidelity algorithms like ASHA easily.
-    df.step = (df.step / 100).astype(np.int64)
-
     # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
-    N = df.reset_index().groupby('trial_id').step.max().min()
-    fidelity_values = list(range(1, N+1))
+    df.step = df.st_worker_iter + 1
+    Nmax = df.reset_index().groupby('trial_id').step.max().min()
+    Nmin = df.reset_index().groupby('trial_id').step.min().min()
+    fidelity_values = list(range(Nmin, Nmax+1))
     fidelity_space = dict(
-        step=sp.choice(fidelity_values),
+        step=sp.finrange(Nmin, Nmax, (Nmax-Nmin)+1, cast_int=True),
     )
 
     serialize(
@@ -180,6 +174,12 @@ def serialize_hf_cloud():
         },
         path=repository_path / BLACKBOX_NAME
     )
+
+
+def import_hf_cloud():
+    bb = load("hf-cloud")
+    bb_dict = {'imdb': HFCloudBlackbox(bb=bb['imdb'])}
+    return bb_dict
 
 
 def generate_hf_cloud(s3_root: Optional[str] = None):
