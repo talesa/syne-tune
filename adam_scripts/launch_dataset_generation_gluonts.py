@@ -32,7 +32,7 @@ from syne_tune.remote.remote_launcher import RemoteLauncher
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
-    np.random.seed(0)
+    # np.random.seed(0)
 
     # instance_types = select_instance_type(min_gpu=0, max_cost_per_hour=20.0)
     instance_types = [
@@ -110,24 +110,27 @@ if __name__ == '__main__':
         "num_cells": cs.randint(lower=1, upper=200),
         "num_layers": cs.randint(lower=1, upper=4),
         # "batch_size": cs.choice([32, 64, 128]),
-        "batch_size": cs.choice([64, 128]),
+        "batch_size": cs.choice([8, 16]),
+        # "batch_size": cs.choice([64, 128]),
         "dataset": "electricity",
-        "st_instance_type": 'ml.c5.4xlarge',
+        "st_instance_type": 'ml.c5.xlarge',
         "only_benchmark_speed": 0,
     }
-    tuner_name = 'deepar-curves-3'
+    tuner_name = 'deepar-curves-6'
     # tuner_name = 'temp'
 
-    n_workers = 9
+    n_workers = 20
 
     wallclock_time_budget = 3600 * 128
-    dollar_cost_budget = 100.0
-    max_num_trials_completed = 1
+    dollar_cost_budget = 400.0
+    max_num_trials_completed = 40
+    # max_num_trials_started = 1
 
     stop_criterion = StoppingCriterion(
         # max_wallclock_time=wallclock_time_budget,
-        max_cost=dollar_cost_budget,
-        # max_num_trials_completed=max_num_trials_completed,
+        # max_cost=dollar_cost_budget,
+        max_num_trials_completed=max_num_trials_completed,
+        # max_num_trials_started=max_num_trials_started,
     )
 
     mode = "min"
