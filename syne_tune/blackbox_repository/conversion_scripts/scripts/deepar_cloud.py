@@ -133,12 +133,12 @@ class DeepARCloudBlackbox(Blackbox):
 
         configuration_space_speed = copy.deepcopy(self.configuration_space)
         configuration_space_speed.pop('lr')
-        configuration_space_speed.configuration_space = {
-            k: v for k, v in configuration_space_speed.configuration_space.items()
+        configuration_space_speed = {
+            k: v for k, v in configuration_space_speed.items()
             if k not in ['lr']}
-        configuration_space_speed.update({
-            'st_instance_type': cs.choice(self.configuration_space['st_instance_type']),
-        })
+        # configuration_space_speed.update({
+        #     'st_instance_type': cs.choice(self.configuration_space['st_instance_type']),
+        # })
         speed_bb = BlackboxOffline(
                 df_evaluations=df,
                 configuration_space=configuration_space_speed,
@@ -181,13 +181,14 @@ class DeepARCloudBlackbox(Blackbox):
             raise ValueError(f'No st_instance_type provided in the configuration: {configuration}')
         target_instance_type = configuration['st_instance_type']
 
-        learning_curve = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
+        res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
+        learning_curve = res[:, 0:1]
         baseline_runtimes = self.bb_training_runtime.objective_function(
             configuration=configuration, fidelity=fidelity, seed=seed)
         baseline_instance_type_array = self.bb_instance_type.objective_function(
             configuration=configuration, fidelity=fidelity, seed=seed)
-        assert len(baseline_instance_type_array.unique()) == 1
-        baseline_instance_type = baseline_instance_type_array.unique()[0]
+        assert len(np.unique(baseline_instance_type_array)) == 1
+        baseline_instance_type = np.unique(baseline_instance_type_array)[0]
         relative_time_factor = self.instance_speed(configuration, baseline_instance_type, fidelity)
 
         target_runtimes = baseline_runtimes * relative_time_factor
@@ -256,7 +257,7 @@ def serialize_deepar_cloud():
                 configuration_space=configuration_space,
                 fidelity_space=fidelity_space,
                 fidelity_values=fidelity_values,
-                objectives_names=[col for col in df.columns if col.startswith("metric_")],
+                objectives_names=[METRIC_VALID_ERROR] + [col for col in df.columns if col.startswith("metric_")],
             )
         },
         path=repository_path / BLACKBOX_NAME

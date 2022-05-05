@@ -17,7 +17,7 @@ if __name__ == '__main__':
     blackbox = bb_dict["electricity"]
 
     # simulating HPO
-    n_workers = 1
+    n_workers = 2
     metric = "mean_wQuantileLoss"
     elapsed_time_attr = 'metric_train_runtime'
 
@@ -27,25 +27,25 @@ if __name__ == '__main__':
     )
 
     # Random search without stopping
-    scheduler = RandomSearch(
-        backend.blackbox.configuration_space,
-        # max_t=max(blackbox.fidelity_values),
-        # resource_attr=next(iter(blackbox.fidelity_space.keys())),
-        mode='min',
-        metric=metric,
-        random_seed=31415927
-    )
-
-    # scheduler = ASHA(
+    # scheduler = RandomSearch(
     #     backend.blackbox.configuration_space,
-    #     max_t=max(blackbox.fidelity_values),
-    #     resource_attr=next(iter(blackbox.fidelity_space.keys())),
+    #     # max_t=max(blackbox.fidelity_values),
+    #     # resource_attr=next(iter(blackbox.fidelity_space.keys())),
     #     mode='min',
     #     metric=metric,
     #     random_seed=31415927
     # )
 
-    stop_criterion = StoppingCriterion(max_wallclock_time=5000)
+    scheduler = ASHA(
+        backend.blackbox.configuration_space,
+        max_t=max(blackbox.fidelity_values),
+        resource_attr=next(iter(blackbox.fidelity_space.keys())),
+        mode='min',
+        metric=metric,
+        random_seed=31415927
+    )
+
+    stop_criterion = StoppingCriterion(max_wallclock_time=100000)
 
     # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
     tuner = Tuner(
