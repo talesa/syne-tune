@@ -91,35 +91,36 @@ if __name__ == '__main__':
     # instance_types = ['ml.c5n.18xlarge',]
     # instance_types = ['ml.p3.2xlarge', ]
 
-    # config_space = {
-    #     "lr": 1e-4,
-    #     "epochs": 100,
-    #     "num_cells": cs.choice([30, 200]),
-    #     "num_layers": cs.choice([1, 4]),
-    #     "batch_size": 128,
-    #     "dataset": "electricity",
-    #     "st_instance_type": cs.choice(instance_types),
-    #     "only_benchmark_speed": 1,
-    # }
-    # tuner_name = 'deepar-speed-bs-128-prev'
-
     config_space = {
+        "lr": 1e-4,
         "epochs": 100,
-        "lr": cs.loguniform(1e-4, 1e-1),
-        # "batch_size": cs.choice([8, 16, 32, 64, 128]),
-        "num_cells": cs.randint(lower=1, upper=200),
-        "num_layers": cs.randint(lower=1, upper=4),
-        # "batch_size": cs.choice([32, 64, 128]),
-        "batch_size": cs.choice([8, 16]),
-        # "batch_size": cs.choice([64, 128]),
+        "num_cells": cs.choice([1, 50, 100, 150, 200]),
+        "num_layers": cs.choice([1, 2, 3, 4]),
+        "batch_size": 128,
         "dataset": "electricity",
-        "st_instance_type": 'ml.c5.xlarge',
-        "only_benchmark_speed": 0,
+        "st_instance_type": cs.choice(instance_types),
+        "only_benchmark_speed": 1,
     }
-    tuner_name = 'deepar-curves-6'
+    tuner_name = f'deepar-speed-bs-{config_space["batch_size"]}'
+
+    # config_space = {
+    #     "epochs": 100,
+    #     "lr": cs.loguniform(1e-4, 1e-1),
+    #     # "batch_size": cs.choice([8, 16, 32, 64, 128]),
+    #     "num_cells": cs.randint(lower=1, upper=200),
+    #     "num_layers": cs.randint(lower=1, upper=4),
+    #     # "batch_size": cs.choice([32, 64, 128]),
+    #     "batch_size": cs.choice([8, 16]),
+    #     # "batch_size": cs.choice([64, 128]),
+    #     "dataset": "electricity",
+    #     "st_instance_type": 'ml.c5.xlarge',
+    #     "only_benchmark_speed": 0,
+    # }
+    # tuner_name = 'deepar-curves-6'
     # tuner_name = 'temp'
 
     n_workers = 20
+    # n_workers = int(len(instance_types) * 20 / 2)
 
     wallclock_time_budget = 3600 * 128
     dollar_cost_budget = 400.0
@@ -129,7 +130,7 @@ if __name__ == '__main__':
     stop_criterion = StoppingCriterion(
         # max_wallclock_time=wallclock_time_budget,
         # max_cost=dollar_cost_budget,
-        max_num_trials_completed=max_num_trials_completed,
+        # max_num_trials_completed=max_num_trials_completed,
         # max_num_trials_started=max_num_trials_started,
     )
 
@@ -176,6 +177,7 @@ if __name__ == '__main__':
         # some failures may happen when SGD diverges with NaNs
         max_failures=10000000,
         tuner_name=tuner_name,
+        trial_throttling_sleep_time=15.0,
     )
 
     # launch the tuning
@@ -188,6 +190,5 @@ if __name__ == '__main__':
         instance_type='ml.m5.large',
         tuner_name=tuner_name,
         dependencies=[str(root / "benchmarking"), str(root / "syne_tune")],
-        sleep_time=15.0,
     )
     remote_launcher.run(wait=False)
