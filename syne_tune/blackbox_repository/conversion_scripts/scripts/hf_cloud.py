@@ -7,7 +7,7 @@ from sklearn.neighbors import KNeighborsRegressor
 
 from syne_tune.blackbox_repository import load, add_surrogate, serialize
 from syne_tune.blackbox_repository.blackbox import Blackbox
-import syne_tune.config_space as sp
+import syne_tune.config_space as cs
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
 from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
@@ -56,12 +56,13 @@ class HFCloudBlackbox(Blackbox):
             seed: Optional[int] = None
     ) -> Dict:
         if 'st_instance_type' not in configuration:
-            raise ValueError(f'No instance_type provided in the configuration: {configuration}')
+            raise ValueError(f'No st_instance_type provided in the configuration: {configuration}')
         instance_type = configuration['st_instance_type']
         relative_time_factor, cost_per_second = self.instance_speed_cost_dict[(instance_type, configuration['per_device_train_batch_size'])]
 
         res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
 
+        # TODO should 3 metrics be hardcoded here?
         if fidelity is not None:
             adjusted_time = res[METRIC_TIME_CUMULATIVE_RESOURCE] * relative_time_factor
             return {
@@ -147,19 +148,19 @@ def serialize_hf_cloud():
         # We are setting batch_size to the values [4, 8, 12, 16] because that's the overlap of the
         # per_device_train_batch_size field in the search spaces used for A) training curves/loss function values
         # generation, and B) relative training speed generation.
-        per_device_train_batch_size=sp.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
-        learning_rate=sp.loguniform(1e-7, 1e-4),
-        weight_decay=sp.loguniform(1e-6, 1e-2),
-        st_instance_type=sp.choice(df_speed.config_st_instance_type.unique())
+        per_device_train_batch_size=cs.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
+        learning_rate=cs.loguniform(1e-7, 1e-4),
+        weight_decay=cs.loguniform(1e-6, 1e-2),
+        st_instance_type=cs.choice(df_speed.config_st_instance_type.unique())
     )
 
     # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
-    df.step = df.st_worker_iter + 1
+    df['step'] = df.st_worker_iter + 1
     Nmax = df.reset_index().groupby('trial_id').step.max().min()
     Nmin = df.reset_index().groupby('trial_id').step.min().min()
     fidelity_values = list(range(Nmin, Nmax+1))
     fidelity_space = dict(
-        step=sp.finrange(Nmin, Nmax, (Nmax-Nmin)+1, cast_int=True),
+        step=cs.finrange(Nmin, Nmax, (Nmax - Nmin) + 1, cast_int=True),
     )
 
     serialize(
