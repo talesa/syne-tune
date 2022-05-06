@@ -44,6 +44,7 @@ class Tuner:
             stop_criterion: Callable[[TuningStatus], bool],
             n_workers: int,
             sleep_time: float = DEFAULT_SLEEP_TIME,
+            trial_throttling_sleep_time: float = 0.0,
             results_update_interval: float = 10.0,
             print_update_interval: float = 30.0,
             max_failures: int = 1,
@@ -59,10 +60,12 @@ class Tuner:
         :param stop_criterion: the tuning stops when this predicates returns True, called each iteration with the
         current tuning status, for instance pass `stop_criterion=lambda status: status.num_trials_completed > 200`
         to stop after 200 completed jobs.
-        :param n_workers: Number of workers used here. Note that the backend
-            needs to support (at least) this number of workers to be run
-            in parallel
+        :param n_workers: Number of workers used here. Note that the backend needs to support (at least) this number
+        of workers to be run in parallel
         :param sleep_time: time to sleep when all workers are busy
+        # TODO Alternatively the trial_throttling_sleep_time could be done in SageMakerBackend's _schedule()?
+        :param trial_throttling_sleep_time: time to sleep after scheduling a new trial, used to prevent throttling
+        errors for some backends such as SageMakerBackend.
         :param results_update_interval: frequency at which results are updated and stored in seconds
         :param max_failures: max failures allowed,
         :param tuner_name: name associated with the tuning experiment, default to the name of the entrypoint.
@@ -81,6 +84,7 @@ class Tuner:
         self.scheduler = scheduler
         self.n_workers = n_workers
         self.sleep_time = sleep_time
+        self.trial_throttling_sleep_time = trial_throttling_sleep_time
         self.results_update_interval = results_update_interval
         self.stop_criterion = stop_criterion
         self.asynchronous_scheduling = asynchronous_scheduling
@@ -102,7 +106,7 @@ class Tuner:
 
         # inform the backend to the folder of the Tuner. This allows the local backend
         # to store the logs and tuner results in the same folder.
-        self.trial_backend.set_path(results_root=self.tuner_path, tuner_name=self.name)
+        self.trial_backend.set_path(results_root=str(self.tuner_path), tuner_name=self.name)
         self.callbacks = callbacks if callbacks is not None else [self._default_callback()]
 
         self.tuning_status = None
@@ -176,7 +180,7 @@ class Tuner:
                     if len(running_trials_ids) > 0:
                         logger.debug(f"Configuration space exhausted, waiting for completion of running trials "
                                      f"{running_trials_ids}")
-                        self._sleep()
+                        self._sleep(self.sleep_time)
                     else:
                         break
                 else:
@@ -222,8 +226,8 @@ class Tuner:
 
             logger.info(f"Tuning finished, results of trials can be found on {self.tuner_path}")
 
-    def _sleep(self):
-        time.sleep(self.sleep_time)
+    def _sleep(self, sleep_time: float):
+        time.sleep(sleep_time)
         for callback in self.callbacks:
             callback.on_tuning_sleep(self.sleep_time)
 
@@ -305,12 +309,13 @@ class Tuner:
             logger.debug(
                 f"{num_running_trials} of {self.n_workers} workers are "
                 f"busy, wait for {self.sleep_time} seconds")
-            self._sleep()
+            self._sleep(self.sleep_time)
 
         else:
             # Schedule as many trials as we have free workers
             for i in range(self.n_workers - num_running_trials):
                 trial_id = self._schedule_new_task()
+                self._sleep(self.trial_throttling_sleep_time)
                 running_trials_ids.add(trial_id)
 
     def _schedule_new_task(self) -> Optional[int]:
