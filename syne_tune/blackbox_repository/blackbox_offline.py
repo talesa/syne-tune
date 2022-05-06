@@ -32,6 +32,8 @@ class BlackboxOffline(Blackbox):
         :param objectives_names: names of the metrics, by default consider all metrics prefixed by "metric_" to be metrics
         :param seed_col: optional, can be used when multiple seeds are recorded
         """
+        # TODO is there a need to define self.metric_cols if self.objectives_names from parent class Blackbox could be
+        #   used?
         if objectives_names is not None:
             self.metric_cols = objectives_names
             for col in objectives_names:
