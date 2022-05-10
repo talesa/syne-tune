@@ -13,6 +13,11 @@ from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOf
 from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
 import syne_tune.experiments
 
+from adam_scripts.utils import (
+    concatenate_syne_tune_experiment_results,
+    upload_df_to_team_bucket,
+)
+
 
 METRIC_VALID_ERROR = 'metric_training_loss'
 
@@ -22,7 +27,14 @@ METRIC_TIME_CUMULATIVE_RESOURCE = 'metric_train_runtime'
 LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES = (
     'loss-lr-wd-bs-2-2022-02-07-23-13-30-781',
 )
-SPEED_SYNE_TUNE_JOB_NAME = 'speed-bs-it-2022-02-07-23-12-47-916'
+SPEED_SYNE_TUNE_JOB_NAMES = (
+    'speed-bs-it-2022-02-07-23-12-47-916',
+)
+
+BLACKBOX_SPEED_S3_PATH = ('s3://mnemosyne-team-bucket/dataset/'
+                          'hf-distilbert-on-imdb-blackbox/hf-distilbert-on-imdb-blackbox-speed.csv.zip')
+BLACKBOX_ERROR_S3_PATH = ('s3://mnemosyne-team-bucket/dataset/'
+                          'hf-distilbert-on-imdb-blackbox/hf-distilbert-on-imdb-blackbox-error.csv.zip')
 
 BLACKBOX_NAME = 'hf-cloud'
 
@@ -31,14 +43,64 @@ class HFCloudBlackbox(Blackbox):
     """
     Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
     """
-    def __init__(self, bb):
-        self.configuration_space = bb.configuration_space
-        self.objectives_names = bb.objectives_names + ["cost"]
+    def __init__(self):
+        df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
+        upload_df_to_team_bucket(df, BLACKBOX_ERROR_S3_PATH)
+
+        df = pd.read_csv(BLACKBOX_ERROR_S3_PATH)
+
+        # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
+        temp = df.groupby(['trial_id', 'step']).loss.count().reset_index()
+        trial_ids_to_be_deleted = temp[temp.loss > 1].trial_id.unique()
+        df.drop(df.index[df['trial_id'].isin(trial_ids_to_be_deleted)], inplace=True)
+
+        assert len(df.config_st_instance_type.unique()) == 1, \
+            "All of the trials should have been performed on the same instance type."
+
+        # Rename some columns
+        columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
+        columns_to_rename.update({
+            'loss': 'metric_training_loss',
+            'st_worker_time': 'metric_train_runtime',
+        })
+        df = df.rename(columns=columns_to_rename)
+
+        df_speed = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
+        upload_df_to_team_bucket(df_speed, BLACKBOX_SPEED_S3_PATH)
+        df_speed = pd.read_csv(BLACKBOX_SPEED_S3_PATH)
+
+        configuration_space = dict(
+            # We are setting batch_size to the values [4, 8, 12, 16] because that's the overlap of the
+            # per_device_train_batch_size field in the search spaces used for A) training curves/loss function values
+            # generation, and B) relative training speed generation.
+            per_device_train_batch_size=cs.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
+            learning_rate=cs.loguniform(1e-7, 1e-4),
+            weight_decay=cs.loguniform(1e-6, 1e-2),
+            st_instance_type=cs.choice(df_speed.config_st_instance_type.unique())
+        )
+
+        # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
+        df['step'] = df.st_worker_iter + 1
+        Nmax = df.reset_index().groupby('trial_id').step.max().min()
+        Nmin = df.reset_index().groupby('trial_id').step.min().min()
+        fidelity_values = list(range(Nmin, Nmax + 1))
+        fidelity_space = dict(
+            step=cs.finrange(Nmin, Nmax, (Nmax - Nmin) + 1, cast_int=True),
+        )
+
+        bb = BlackboxOffline(
+                    df_evaluations=df,
+                    configuration_space=configuration_space,
+                    fidelity_space=fidelity_space,
+                    fidelity_values=fidelity_values,
+                    objectives_names=['metric_training_loss', 'metric_train_runtime'],
+                )
+
         super(HFCloudBlackbox, self).__init__(
-            configuration_space=self.configuration_space,
-            fidelity_space=bb.fidelity_space,
-            fidelity_values=bb.fidelity_values,
-            objectives_names=self.objectives_names,
+            configuration_space=configuration_space,
+            fidelity_space=fidelity_space,
+            fidelity_values=fidelity_values,
+            objectives_names=['metric_training_loss', 'metric_train_runtime', 'metric_cost'],
         )
         self.bb = add_surrogate(bb, surrogate=KNeighborsRegressor(n_neighbors=3, weights='distance'),)
 
@@ -47,7 +109,6 @@ class HFCloudBlackbox(Blackbox):
         # Sets the baseline_instance_type to the single instance type all of the loss values were collected for.
         baseline_instance_type = bb.df.reset_index().st_instance_type.unique()[0]
         self.instance_speed_cost_dict = instance_speed_cost(baseline_instance_type=baseline_instance_type)
-        # self.configuration_space["instance_type"] = sp.choice(np.unique(np.array(list(self.instance_speed_cost_dict.keys()))[:, 0]).tolist())
 
     def _objective_function(
             self,
@@ -81,7 +142,7 @@ class HFCloudBlackbox(Blackbox):
             return res
 
 
-def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, float]]:
+def instance_speed_cost(baseline_instance_type: str) -> Dict[Tuple[str, float], Tuple[float, float]]:
     """
     :param baseline_instance_type: The baseline instance type that was used to collect the loss functions for the
       blackbox.
@@ -92,7 +153,7 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, f
     instance_info = InstanceInfos()
     instance_hourly_cost = {instance: instance_info(instance).cost_per_hour for instance in instance_info.instances}
 
-    df = syne_tune.experiments.load_experiment(SPEED_SYNE_TUNE_JOB_NAME).results
+    df = pd.read_csv(BLACKBOX_SPEED_S3_PATH)
     time_col = 'time_per_gradient_step'
     df[time_col] = df.st_worker_time / df.step
 
@@ -116,77 +177,6 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[str, Tuple[float, f
     return output
 
 
-def serialize_hf_cloud():
-    dfs_to_concat = list()
-    trial_id_max = -1
-    for tuner_job_name in LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES:
-        df_temp = syne_tune.experiments.load_experiment(tuner_job_name).results
-        df_temp['trial_id'] += trial_id_max + 1
-        trial_id_max = df_temp['trial_id'].max()
-        dfs_to_concat.append(df_temp)
-    df = pd.concat(dfs_to_concat).reset_index()
-
-    # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
-    temp = df.groupby(['trial_id', 'step']).loss.count().reset_index()
-    trial_ids_to_be_deleted = temp[temp.loss > 1].trial_id.unique()
-    df.drop(df.index[df['trial_id'].isin(trial_ids_to_be_deleted)], inplace=True)
-
-    assert len(df.config_st_instance_type.unique()) == 1, \
-        "All of the trials should have been performed on the same instance type."
-
-    # Rename some columns
-    columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
-    columns_to_rename.update({
-        'loss': 'metric_training_loss',
-        'st_worker_time': 'metric_train_runtime',
-    })
-    df = df.rename(columns=columns_to_rename)
-
-    df_speed = syne_tune.experiments.load_experiment(SPEED_SYNE_TUNE_JOB_NAME).results
-
-    configuration_space = dict(
-        # We are setting batch_size to the values [4, 8, 12, 16] because that's the overlap of the
-        # per_device_train_batch_size field in the search spaces used for A) training curves/loss function values
-        # generation, and B) relative training speed generation.
-        per_device_train_batch_size=cs.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
-        learning_rate=cs.loguniform(1e-7, 1e-4),
-        weight_decay=cs.loguniform(1e-6, 1e-2),
-        st_instance_type=cs.choice(df_speed.config_st_instance_type.unique())
-    )
-
-    # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
-    df['step'] = df.st_worker_iter + 1
-    Nmax = df.reset_index().groupby('trial_id').step.max().min()
-    Nmin = df.reset_index().groupby('trial_id').step.min().min()
-    fidelity_values = list(range(Nmin, Nmax+1))
-    fidelity_space = dict(
-        step=cs.finrange(Nmin, Nmax, (Nmax - Nmin) + 1, cast_int=True),
-    )
-
-    serialize(
-        {
-            'imdb': BlackboxOffline(
-                df_evaluations=df,
-                configuration_space=configuration_space,
-                fidelity_space=fidelity_space,
-                fidelity_values=fidelity_values,
-                objectives_names=[col for col in df.columns if col.startswith("metric_")],
-            )
-        },
-        path=repository_path / BLACKBOX_NAME
-    )
-
-
 def import_hf_cloud():
-    bb = load("hf-cloud")
-    bb_dict = {'imdb': HFCloudBlackbox(bb=bb['imdb'])}
+    bb_dict = {'imdb': HFCloudBlackbox()}
     return bb_dict
-
-
-def generate_hf_cloud(s3_root: Optional[str] = None):
-    serialize_hf_cloud()
-    upload(name=BLACKBOX_NAME, s3_root=s3_root)
-
-
-if __name__ == '__main__':
-    generate_hf_cloud()
