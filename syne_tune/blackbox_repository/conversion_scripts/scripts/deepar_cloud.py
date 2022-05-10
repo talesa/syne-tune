@@ -1,6 +1,5 @@
 import copy
 from numbers import Number
-from pathlib import Path
 from typing import Dict, Tuple, Optional, Union
 import pandas as pd
 import numpy as np
@@ -13,7 +12,11 @@ import syne_tune.config_space as cs
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
 from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
-import syne_tune.experiments
+
+from adam_scripts.utils import (
+    concatenate_syne_tune_experiment_results,
+    upload_df_to_team_bucket,
+)
 
 
 METRIC_VALID_ERROR = 'mean_wQuantileLoss'
@@ -25,13 +28,14 @@ LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES = (
     'deepar-curves-2022-04-25-10-46-32-616',
     'deepar-curves-2-2022-04-25-12-31-30-154',
     'deepar-curves-3-2022-04-25-12-32-14-346',
-#     'deepar-curves-4-2022-05-04-08-53-23-418',
+    'deepar-curves-4-2022-05-04-08-53-23-418',
 #     # There was no deepar-curves-5
-#     'deepar-curves-6-2022-05-04-08-54-35-102',
+    'deepar-curves-6-2022-05-04-08-54-35-102',
 )
 SPEED_SYNE_TUNE_JOB_NAMES = (
-    'deepar-speed-bs-32-2022-04-21-16-25-04-045',
-    'deepar-speed-bs-32-2022-04-21-14-48-44-131',
+    # 'deepar-speed-bs-32-2022-04-21-16-25-04-045', old
+    'deepar-speed-bs-128-2022-05-06-11-50-30-088',
+    'deepar-speed-bs-64-2022-05-06-11-45-25-787',
 )
 
 BLACKBOX_NAME = 'deepar-cloud'
@@ -116,14 +120,10 @@ class DeepARCloudBlackbox(Blackbox):
         self.bb_training_runtime = add_surrogate(bb_training_runtime, surrogate=KNeighborsRegressor(n_neighbors=1), )
 
         # Set up KNN-surrogate-based Blackbox for the speed measurements
-        dfs_to_concat = list()
-        trial_id_max = -1
-        for tuner_job_name in SPEED_SYNE_TUNE_JOB_NAMES:
-            df_temp = syne_tune.experiments.load_experiment(tuner_job_name).results
-            df_temp['trial_id'] += trial_id_max + 1
-            trial_id_max = df_temp['trial_id'].max()
-            dfs_to_concat.append(df_temp)
-        df = pd.concat(dfs_to_concat).reset_index()
+        s3_path = 's3://mnemosyne-team-bucket/dataset/deepar_blackbox/deepar_blackbox_speed.csv.zip'
+        # df = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
+        # upload_df_to_team_bucket(df, s3_path)
+        df = pd.read_csv(s3_path)
 
         columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
         columns_to_rename.update({
@@ -136,9 +136,6 @@ class DeepARCloudBlackbox(Blackbox):
         configuration_space_speed = {
             k: v for k, v in configuration_space_speed.items()
             if k not in ['lr']}
-        # configuration_space_speed.update({
-        #     'st_instance_type': cs.choice(self.configuration_space['st_instance_type']),
-        # })
         speed_bb = BlackboxOffline(
                 df_evaluations=df,
                 configuration_space=configuration_space_speed,
@@ -183,11 +180,15 @@ class DeepARCloudBlackbox(Blackbox):
 
         res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
         learning_curve = res[:, 0:1]
+        # TODO check what parameters are passed here
         baseline_runtimes = self.bb_training_runtime.objective_function(
             configuration=configuration, fidelity=fidelity, seed=seed)
         baseline_instance_type_array = self.bb_instance_type.objective_function(
             configuration=configuration, fidelity=fidelity, seed=seed)
         assert len(np.unique(baseline_instance_type_array)) == 1
+        assert res.shape[1] == 100
+        assert baseline_runtimes.shape[1] == 100
+        assert baseline_instance_type_array.shape[1] == 100
         baseline_instance_type = np.unique(baseline_instance_type_array)[0]
         relative_time_factor = self.instance_speed(configuration, baseline_instance_type, fidelity)
 
@@ -206,14 +207,11 @@ class DeepARCloudBlackbox(Blackbox):
 
 
 def serialize_deepar_cloud():
-    dfs_to_concat = list()
-    trial_id_max = -1
-    for tuner_job_name in LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES:
-        df_temp = syne_tune.experiments.load_experiment(tuner_job_name).results
-        df_temp['trial_id'] += trial_id_max + 1
-        trial_id_max = df_temp['trial_id'].max()
-        dfs_to_concat.append(df_temp)
-    df = pd.concat(dfs_to_concat).reset_index()
+    s3_path = 's3://mnemosyne-team-bucket/dataset/deepar_blackbox/deepar_blackbox_error.csv.zip'
+    # df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
+    # upload_df_to_team_bucket(df, s3_path)
+
+    df = pd.read_csv(s3_path)
 
     # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
     temp = df.groupby(['trial_id', 'st_worker_iter']).mean_wQuantileLoss.count().reset_index()
