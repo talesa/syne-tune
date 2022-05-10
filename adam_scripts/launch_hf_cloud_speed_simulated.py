@@ -1,7 +1,7 @@
 import logging
 from argparse import ArgumentParser
 
-from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_distilbert_on_imdb_static import import_hf_cloud_speed
+from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_distilbert_on_imdb_static import import_hf_distilbert_on_imdb_static
 from syne_tune.blackbox_repository.simulated_tabular_backend import UserBlackboxBackend
 
 from syne_tune.backend.simulator_backend.simulator_callback import SimulatorCallback
@@ -40,7 +40,7 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.CRITICAL)
 
     # loading data and querying stuff
-    bb_dict = import_hf_cloud_speed()
+    bb_dict = import_hf_distilbert_on_imdb_static()
     blackbox = bb_dict["imdb"]
 
     # simulating HPO

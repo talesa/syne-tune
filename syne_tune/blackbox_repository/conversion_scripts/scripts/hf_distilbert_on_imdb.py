@@ -181,6 +181,6 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[Tuple[str, float], 
     return output
 
 
-def import_hf_cloud():
+def import_hf_distilbert_on_imdb():
     bb_dict = {'imdb': HFDistilbertOnImdbBlackbox()}
     return bb_dict

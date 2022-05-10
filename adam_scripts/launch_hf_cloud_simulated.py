@@ -1,7 +1,6 @@
 import logging
-import syne_tune.config_space as sp
 
-from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_cloud import import_hf_cloud
+from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_distilbert_on_imdb import import_hf_distilbert_on_imdb
 from syne_tune.blackbox_repository.simulated_tabular_backend import UserBlackboxBackend
 
 from syne_tune.backend.simulator_backend.simulator_callback import SimulatorCallback
@@ -14,7 +13,7 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
 
     # loading data and querying stuff
-    bb_dict = import_hf_cloud()
+    bb_dict = import_hf_distilbert_on_imdb()
     blackbox = bb_dict["imdb"]
 
     # simulating HPO

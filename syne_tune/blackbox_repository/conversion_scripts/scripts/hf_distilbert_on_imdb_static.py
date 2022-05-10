@@ -183,6 +183,6 @@ class HFDistilbertOnImdbStaticBlackbox(Blackbox):
         return res
 
 
-def import_hf_cloud_speed():
+def import_hf_distilbert_on_imdb_static():
     bb_dict = {'imdb': HFDistilbertOnImdbStaticBlackbox()}
     return bb_dict
