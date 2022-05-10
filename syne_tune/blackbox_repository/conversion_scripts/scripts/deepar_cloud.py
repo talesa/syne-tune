@@ -32,10 +32,9 @@ LEARNING_CURVE_SYNE_TUNE_JOB_NAMES = (
     'deepar-curves-6-2022-05-04-08-54-35-102',
 )
 SPEED_SYNE_TUNE_JOB_NAMES = (
-    # 'deepar-speed-bs-32-2022-04-21-16-25-04-045', old
     'deepar-speed-bs-128-2022-05-06-11-50-30-088',
     'deepar-speed-bs-64-2022-05-06-11-45-25-787',
-    # 'deepar-speed-bs-32-2022-05-10-10-07-22-265', new
+    'deepar-speed-bs-32-2022-05-10-10-07-22-265',
 )
 
 BLACKBOX_NAME = 'deepar-cloud'
