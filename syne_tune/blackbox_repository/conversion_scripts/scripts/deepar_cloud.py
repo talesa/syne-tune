@@ -70,6 +70,11 @@ INSTANCE_TYPES = [
         'ml.m5.xlarge',
 ]
 
+BLACKBOX_SPEED_S3_PATH = ('s3://mnemosyne-team-bucket/dataset/'
+                          'deepar-on-electricity-blackbox/deepar-on-electricity-blackbox-speed.csv.zip')
+BLACKBOX_ERROR_S3_PATH = ('s3://mnemosyne-team-bucket/dataset/'
+                          'deepar-on-electricity-blackbox/deepar-on-electricity-blackbox-error.csv.zip')
+
 
 class DeepARCloudBlackbox(Blackbox):
     """
@@ -82,11 +87,9 @@ class DeepARCloudBlackbox(Blackbox):
         # 3. Blackbox for the training_runtime correction for the target instance_type, KNN(n_neighbors=2)
 
         # 1. Blackbox for the error, KNN(n_neighbors=3)
-        s3_path = 's3://mnemosyne-team-bucket/dataset/deepar_blackbox/deepar_blackbox_error.csv.zip'
-        # df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
-        # upload_df_to_team_bucket(df, s3_path)
-
-        df = pd.read_csv(s3_path)
+        df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
+        upload_df_to_team_bucket(df, BLACKBOX_ERROR_S3_PATH)
+        df = pd.read_csv(BLACKBOX_ERROR_S3_PATH)
 
         # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
         temp = df.groupby(['trial_id', 'st_worker_iter']).mean_wQuantileLoss.count().reset_index()
@@ -175,10 +178,9 @@ class DeepARCloudBlackbox(Blackbox):
         self.bb_training_runtime = add_surrogate(bb_training_runtime, surrogate=KNeighborsRegressor(n_neighbors=1), )
 
         # 3. Blackbox for the training_runtime correction for the target instance type, KNN(n_neighbors=2)
-        s3_path = 's3://mnemosyne-team-bucket/dataset/deepar_blackbox/deepar_blackbox_speed.csv.zip'
-        # df = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
-        # upload_df_to_team_bucket(df, s3_path)
-        df = pd.read_csv(s3_path)
+        df = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
+        upload_df_to_team_bucket(df, BLACKBOX_SPEED_S3_PATH)
+        df = pd.read_csv(BLACKBOX_SPEED_S3_PATH)
 
         columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
         columns_to_rename.update({
