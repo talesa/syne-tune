@@ -15,7 +15,8 @@ import sys
 from collections import defaultdict
 from typing import Dict, Optional, List, Union, Sequence
 
-from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_cloud_speed import HFCloudSpeedBlackbox
+from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_distilbert_on_imdb_static import (
+    HFDistilbertOnImdbStaticBlackbox)
 
 sys.path.insert(0, '/Users/awgol/code/botorch/')
 
@@ -40,7 +41,7 @@ import syne_tune.config_space as cs
 
 from torch import Tensor
 
-__all__ = ['BotorchMOGP']
+__all__ = ['HFDistilbertOnImdbStaticMOBO']
 
 from syne_tune.optimizer.schedulers.botorch.encode_decode_utils import encode_config, decode_config
 
@@ -52,7 +53,7 @@ import numpy as np
 import botorch
 
 
-class BotorchMOGP(TrialScheduler):
+class HFDistilbertOnImdbStaticMOBO(TrialScheduler):
     def __init__(
             self,
             config_space: Dict,
@@ -121,7 +122,7 @@ class BotorchMOGP(TrialScheduler):
             # remove configs that fail due to OOM
             all_possible_configs = set(
                 x for x in all_possible_configs
-                if x[1] <= HFCloudSpeedBlackbox.per_device_train_batch_size_limits[x[0].split('.')[1]])
+                if x[1] <= HFDistilbertOnImdbStaticBlackbox.per_device_train_batch_size_limits[x[0].split('.')[1]])
         all_configs_dicts = tuple({k: v for k, v in zip(self.config_space.keys(), config)}
                                   for config in all_possible_configs)
         self.all_configs_vector = dict.fromkeys(
@@ -216,36 +217,18 @@ class BotorchMOGP(TrialScheduler):
             return TrialSuggestion.start_suggestion(config=suggestion)
 
     def sample_random(self) -> Dict:
-        if self.exclude_oom_runs:
-            idx = np.random.randint(0, len(self.all_configs_vector))
-            sample_encoded = list(self.all_configs_vector.keys())[idx]
-            self.all_configs_vector.pop(sample_encoded)
-            if sample_encoded in self.x:
-                raise Exception('DID NOT EXPECT THIS')
-            return decode_config(
-                encoded_vector=sample_encoded,
-                config_space=self.config_space,
-                inv_categorical_maps=self.inv_categorical_maps,
-                cat_to_onehot=False,
-                normalize_bounded_domains=False,
-            )
-        else:
-            sample = {
-                k: v.sample()
-                if isinstance(v, cs.Domain) else v
-                for k, v in self.config_space.items()
-            }
-            sample_encoded = encode_config(
-                config=sample,
-                config_space=self.config_space,
-                categorical_maps=self.categorical_maps,
-                cat_to_onehot=False,
-                normalize_bounded_domains=False,
-            )
-            if sample_encoded not in self.x:
-                return sample
-            else:
-                return self.sample_random()
+        idx = np.random.randint(0, len(self.all_configs_vector))
+        sample_encoded = list(self.all_configs_vector.keys())[idx]
+        self.all_configs_vector.pop(sample_encoded)
+        if sample_encoded in self.x:
+            raise Exception('Something went wrong with removing the values when sampling.')
+        return decode_config(
+            encoded_vector=sample_encoded,
+            config_space=self.config_space,
+            inv_categorical_maps=self.inv_categorical_maps,
+            cat_to_onehot=False,
+            normalize_bounded_domains=False,
+        )
 
     def sample_gp(self) -> Union[dict, None]:
         try:
@@ -296,21 +279,6 @@ class BotorchMOGP(TrialScheduler):
 
             sampler = SobolQMCNormalSampler(num_samples=self.num_mc_samples, seed=1 if fixed_seed else None)
 
-            run2 = False
-            if run2:
-                if len(self.cat_dims) > 0:
-                    models2 = [MixedSingleTaskGP(x_norm, y[:, i:i + 1],
-                                                    cat_dims=self.cat_dims,
-                                                    input_transform=input_transforms,
-                                                    outcome_transform=outcome_transform)
-                                  for i in range(len(self.metrics))]
-                model2 = ModelListGP(*models2)
-
-                mll2 = SumMarginalLogLikelihood(model2.likelihood, model2)
-                fit_gpytorch_model(mll2)
-
-                sampler2 = SobolQMCNormalSampler(num_samples=self.num_mc_samples, seed=1 if fixed_seed else None)
-
             def objective_transform(Y: Tensor, X: Optional[Tensor] = None) -> Tensor:
                 # cloning because we are using an in-place operation below
                 X_clone = X.clone()
@@ -322,7 +290,7 @@ class BotorchMOGP(TrialScheduler):
                 y0_unnorm = Y[..., 0]
                 y1_unnorm = y0_unnorm * instance_cost
 
-                assert (y0_unnorm < 0.).sum() == 0
+                # assert (y0_unnorm < 0.).sum() == 0
 
                 # if y1_unnorm.shape[-1] == len(self.y):
                 #     y_true = np.array(self.y)
@@ -355,21 +323,8 @@ class BotorchMOGP(TrialScheduler):
                 objective=objective,
                 cache_root=False if self.deterministic_transform else True,
             )
-            if run2:
-                acq_func2 = qNoisyExpectedHypervolumeImprovement(
-                    model=model2,
-                    ref_point=self.ref_point,
-                    X_baseline=x_norm,
-                    # X_baseline=x_unnorm,
-                    prune_baseline=True,  # False if self.deterministic_transform else True,
-                    sampler=sampler2,
-                    objective=GenericMCMultiOutputObjective(lambda x: -x),
-                    cache_root=False,
-                )
 
             # compute all of the points in the config_space still left to consider
-            for config in self.x:
-                self.all_configs_vector.pop(config, None)
             x_to_consider = tuple(self.all_configs_vector.keys())
             if len(x_to_consider) == 0:
                 # No more points in the config space to consider, the end of the optimization
@@ -377,19 +332,16 @@ class BotorchMOGP(TrialScheduler):
             if not (len(self.all_configs_vector) + len(self.x) == self.number_of_combinations):
                 raise Exception('Value has not been removed from self.all_configs_vector correctly.')
 
-            # describe = lambda x: print(
-            #  f"mean: {x.mean()}\nmedian: {x.median()}\nmax: {x.max()}\nmin: {x.min()}\nstd: {x.std()}")
-
             x_to_consider_unnorm = torch.DoubleTensor(np.stack([
                 self.config_to_tuple_features_dict[k] for k in x_to_consider], axis=0))
             x_to_consider_norm = normalize(x_to_consider_unnorm, self.bounds)
             # batch_shape below required to compute the acquisition function over different possible points rather than
             # all of those points jointly
             acq_func_values = acq_func(x_to_consider_norm.reshape(-1, 1, x_to_consider_norm.shape[-1]))
-            if run2:
-                acq_func_values2 = acq_func2(x_to_consider_norm.reshape(-1, 1, x_to_consider_norm.shape[-1]))
             acq_func_idxmax = acq_func_values.argmax()
             candidate = np.array(x_to_consider[acq_func_idxmax], dtype=np.double)
+            # remove the selected point from among the points to consider
+            self.all_configs_vector.pop(x_to_consider[acq_func_idxmax], None)
 
             return decode_config(
                 config_space=self.config_space,

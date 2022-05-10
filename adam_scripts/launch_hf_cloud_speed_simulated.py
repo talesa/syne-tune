@@ -1,12 +1,12 @@
 import logging
 from argparse import ArgumentParser
 
-from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_cloud_speed import import_hf_cloud_speed
+from syne_tune.blackbox_repository.conversion_scripts.scripts.hf_distilbert_on_imdb_static import import_hf_cloud_speed
 from syne_tune.blackbox_repository.simulated_tabular_backend import UserBlackboxBackend
 
 from syne_tune.backend.simulator_backend.simulator_callback import SimulatorCallback
 from syne_tune.optimizer.baselines import RandomSearch
-from syne_tune.optimizer.schedulers.multiobjective.botorch_mo_gp import BotorchMOGP
+from syne_tune.optimizer.schedulers.multiobjective.hf_distilbert_on_imdb_static_mobo import HFDistilbertOnImdbStaticMOBO
 from syne_tune.stopping_criterion import StoppingCriterion
 from syne_tune.tuner import Tuner
 
@@ -52,6 +52,7 @@ if __name__ == '__main__':
         raise ValueError(f"Unknown setting for --searcher: {args.searcher}. Should be one of: random, mobo.")
     if args.searcher == 'random':
         assert args.deterministic_transform == 0, "If args.searcher==random, args.deterministic_transform should be 0."
+        assert args.exclude_oom_runs == 0, "If args.searcher==random, args.exclude_oom_runs should be 0."
 
     print(args.features)
 
@@ -63,7 +64,7 @@ if __name__ == '__main__':
         )
 
         if args.searcher == 'mobo':
-            scheduler = BotorchMOGP(
+            scheduler = HFDistilbertOnImdbStaticMOBO(
                 config_space=blackbox.configuration_space,
                 mode='min',
                 metrics=blackbox.metrics,
@@ -81,8 +82,8 @@ if __name__ == '__main__':
 
         stop_criterion = StoppingCriterion(
             max_cost=args.max_cost,
-            max_num_trials_finished=132,  # OOM runs excluded
-            # max_num_trials_finished=168,  # OOM runs included
+            max_num_trials_finished=132 if args.exclude_oom_runs else 168,  # OOM runs excluded
+            # max_num_trials_finished=,  # OOM runs included
         )
 
         # It is important to set `sleep_time` to 0 here (mandatory for simulator backend)
