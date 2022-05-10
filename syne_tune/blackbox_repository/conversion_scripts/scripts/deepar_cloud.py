@@ -126,7 +126,7 @@ class DeepARCloudBlackbox(Blackbox):
             step=cs.finrange(Nmin, Nmax, (Nmax - Nmin) + 1, cast_int=True),
         )
 
-        objectives_names = [METRIC_VALID_ERROR, 'metric_train_runtime', "cost"]
+        objectives_names = [METRIC_VALID_ERROR, 'metric_train_runtime', "metric_cost"]
         super(DeepARCloudBlackbox, self).__init__(
             configuration_space=configuration_space,
             fidelity_space=fidelity_space,
