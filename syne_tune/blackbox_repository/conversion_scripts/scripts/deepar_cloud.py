@@ -36,6 +36,7 @@ SPEED_SYNE_TUNE_JOB_NAMES = (
     # 'deepar-speed-bs-32-2022-04-21-16-25-04-045', old
     'deepar-speed-bs-128-2022-05-06-11-50-30-088',
     'deepar-speed-bs-64-2022-05-06-11-45-25-787',
+    # 'deepar-speed-bs-32-2022-05-10-10-07-22-265', new
 )
 
 BLACKBOX_NAME = 'deepar-cloud'
@@ -72,27 +73,81 @@ INSTANCE_TYPES = [
 
 class DeepARCloudBlackbox(Blackbox):
     """
-    Dataset generated using adam_scripts/
+    Dataset generated using adam_scripts/launch_dataset_generation_gluonts.py
     """
-    def __init__(self, bb):
-        self.configuration_space = bb.configuration_space
-        self.objectives_names = bb.objectives_names + ["cost"]
-        super(DeepARCloudBlackbox, self).__init__(
-            configuration_space=self.configuration_space,
-            fidelity_space=bb.fidelity_space,
-            fidelity_values=bb.fidelity_values,
-            objectives_names=self.objectives_names,
+    def __init__(self):
+        # In __init__ we set up 3 surrogates:
+        # 1. Blackbox for the error, KNN(n_neighbors=3)
+        # 2. Blackbox for the baseline training_runtime and instance_type, KNN(n_neighbors=1)
+        # 3. Blackbox for the training_runtime correction for the target instance_type, KNN(n_neighbors=2)
+
+        # 1. Blackbox for the error, KNN(n_neighbors=3)
+        s3_path = 's3://mnemosyne-team-bucket/dataset/deepar_blackbox/deepar_blackbox_error.csv.zip'
+        # df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
+        # upload_df_to_team_bucket(df, s3_path)
+
+        df = pd.read_csv(s3_path)
+
+        # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
+        temp = df.groupby(['trial_id', 'st_worker_iter']).mean_wQuantileLoss.count().reset_index()
+
+        trial_ids_with_duplicates = set(temp[temp.mean_wQuantileLoss > 1].trial_id.unique())
+        trial_ids_with_all_iters = set(df[df.epoch_no == 100].trial_id.unique())
+
+        trial_ids_to_keep = (trial_ids_with_all_iters.difference(trial_ids_with_duplicates))
+
+        df.drop(df.index[~df['trial_id'].isin(trial_ids_to_keep)], inplace=True)
+
+        # Rename some columns
+        columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
+        columns_to_rename.update({
+            # 'mean_wQuantileLoss': 'metric_training_loss',
+            'st_worker_time': 'metric_train_runtime',
+        })
+        df = df.rename(columns=columns_to_rename)
+
+        configuration_space = {
+            "lr": cs.loguniform(1e-4, 1e-1),
+            "batch_size": cs.logfinrange(8, 128, 5, cast_int=True),  # cs.choice([8, 16, 32, 64, 128]),
+            "num_cells": cs.randint(lower=1, upper=200),
+            "num_layers": cs.randint(lower=1, upper=4),
+            "st_instance_type": cs.choice(INSTANCE_TYPES),
+        }
+
+        # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
+        df['step'] = df.st_worker_iter + 1
+        Nmax = df.reset_index().groupby('trial_id').step.max().min()
+        Nmin = df.reset_index().groupby('trial_id').step.min().min()
+        fidelity_values = list(range(Nmin, Nmax + 1))
+        fidelity_space = dict(
+            step=cs.finrange(Nmin, Nmax, (Nmax - Nmin) + 1, cast_int=True),
         )
-        self.bb = add_surrogate(bb, surrogate=KNeighborsRegressor(n_neighbors=3, weights='distance'),)
 
-        self.instance_info = InstanceInfos()
+        objectives_names = [METRIC_VALID_ERROR, 'metric_train_runtime', "cost"]
+        super(DeepARCloudBlackbox, self).__init__(
+            configuration_space=configuration_space,
+            fidelity_space=fidelity_space,
+            fidelity_values=fidelity_values,
+            objectives_names=objectives_names,
+        )
 
+        bb_error = BlackboxOffline(
+                df_evaluations=df,
+                configuration_space=configuration_space,
+                fidelity_space=fidelity_space,
+                fidelity_values=fidelity_values,
+                objectives_names=[METRIC_VALID_ERROR] + [col for col in df.columns if col.startswith("metric_")],
+            )
+
+        self.bb_error = add_surrogate(bb_error, surrogate=KNeighborsRegressor(n_neighbors=2, weights='distance'), )
+
+        # 2. Blackbox for the baseline training_runtime and instance_type, KNN(n_neighbors=1)
         # TODO rewrite this properly creating Blackbox objects rather than hacking it like this
         # Prepare the two blackboxes, self.bb_instance_type and self.bb_training_runtime, which return the
         # st_instance_type the metric_training_runtime for consecutive fidelities.
         # We need these such that we can then adjust the st_worker_time/train_runtime using information from the
         # speed-benchmarking-runs.
-        bb_instance_type = copy.deepcopy(bb)
+        bb_instance_type = copy.deepcopy(bb_error)
         bb_instance_type.configuration_space = {
             k: v for k, v in bb_instance_type.configuration_space.items()
             if k not in ['lr', 'st_instance_type']}
@@ -119,7 +174,7 @@ class DeepARCloudBlackbox(Blackbox):
         bb_training_runtime.metric_cols = ['metric_train_runtime']
         self.bb_training_runtime = add_surrogate(bb_training_runtime, surrogate=KNeighborsRegressor(n_neighbors=1), )
 
-        # Set up KNN-surrogate-based Blackbox for the speed measurements
+        # 3. Blackbox for the training_runtime correction for the target instance type, KNN(n_neighbors=2)
         s3_path = 's3://mnemosyne-team-bucket/dataset/deepar_blackbox/deepar_blackbox_speed.csv.zip'
         # df = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
         # upload_df_to_team_bucket(df, s3_path)
@@ -146,11 +201,13 @@ class DeepARCloudBlackbox(Blackbox):
         # It might make sense to either create separate blackboxes for each instance type (such that the interpolation
         # is happening only within a single st_instance_type value, or specify a tailored distance function for the
         # KNeighborsRegressor object that prevents interpolation across instance types.
-        self.speed_bb = add_surrogate(speed_bb, surrogate=KNeighborsRegressor(n_neighbors=3, weights='distance'),)
+        self.bb_speed = add_surrogate(speed_bb, surrogate=KNeighborsRegressor(n_neighbors=3, weights='distance'), )
 
         # self.bb_instance_type.objective_function({'batch_size': 32, 'num_cells': 18, 'num_layers': 2})
         # self.bb_training_runtime.objective_function({'batch_size': 32, 'num_cells': 18, 'num_layers': 2})
         # self.speed_bb.objective_function({'st_instance_type': 'ml.m5.xlarge', 'batch_size': 32, 'num_cells': 18, 'num_layers': 2})
+
+        self.instance_info = InstanceInfos()
 
     def instance_speed(self, configuration: Dict, baseline_instance_type: str, fidelity: Union[Dict, Number] = None) -> float:
         """
@@ -162,8 +219,8 @@ class DeepARCloudBlackbox(Blackbox):
         """
         configuration_baseline = configuration.copy()
         configuration_baseline['st_instance_type'] = baseline_instance_type
-        target_time = self.speed_bb.objective_function(configuration=configuration, fidelity=fidelity)['metric_train_runtime']
-        baseline_time = self.speed_bb.objective_function(configuration=configuration_baseline, fidelity=fidelity)['metric_train_runtime']
+        target_time = self.bb_speed.objective_function(configuration=configuration, fidelity=fidelity)['metric_train_runtime']
+        baseline_time = self.bb_speed.objective_function(configuration=configuration_baseline, fidelity=fidelity)['metric_train_runtime']
         output = target_time/baseline_time
 
         return output
@@ -178,7 +235,7 @@ class DeepARCloudBlackbox(Blackbox):
             raise ValueError(f'No st_instance_type provided in the configuration: {configuration}')
         target_instance_type = configuration['st_instance_type']
 
-        res = self.bb.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
+        res = self.bb_error.objective_function(configuration=configuration, fidelity=fidelity, seed=seed)
         learning_curve = res[:, 0:1]
         # TODO check what parameters are passed here
         baseline_runtimes = self.bb_training_runtime.objective_function(
@@ -186,9 +243,9 @@ class DeepARCloudBlackbox(Blackbox):
         baseline_instance_type_array = self.bb_instance_type.objective_function(
             configuration=configuration, fidelity=fidelity, seed=seed)
         assert len(np.unique(baseline_instance_type_array)) == 1
-        assert res.shape[1] == 100
-        assert baseline_runtimes.shape[1] == 100
-        assert baseline_instance_type_array.shape[1] == 100
+        assert res.shape[0] == 100
+        assert baseline_runtimes.shape[0] == 100
+        assert baseline_instance_type_array.shape[0] == 100
         baseline_instance_type = np.unique(baseline_instance_type_array)[0]
         relative_time_factor = self.instance_speed(configuration, baseline_instance_type, fidelity)
 
@@ -206,72 +263,6 @@ class DeepARCloudBlackbox(Blackbox):
             return np.hstack([learning_curve, target_runtimes, target_runtimes * cost_per_second])
 
 
-def serialize_deepar_cloud():
-    s3_path = 's3://mnemosyne-team-bucket/dataset/deepar_blackbox/deepar_blackbox_error.csv.zip'
-    # df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
-    # upload_df_to_team_bucket(df, s3_path)
-
-    df = pd.read_csv(s3_path)
-
-    # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
-    temp = df.groupby(['trial_id', 'st_worker_iter']).mean_wQuantileLoss.count().reset_index()
-
-    trial_ids_with_duplicates = set(temp[temp.mean_wQuantileLoss > 1].trial_id.unique())
-    trial_ids_with_all_iters = set(df[df.epoch_no == 100].trial_id.unique())
-
-    trial_ids_to_keep = (trial_ids_with_all_iters.difference(trial_ids_with_duplicates))
-
-    df.drop(df.index[~df['trial_id'].isin(trial_ids_to_keep)], inplace=True)
-
-    # Rename some columns
-    columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
-    columns_to_rename.update({
-        # 'mean_wQuantileLoss': 'metric_training_loss',
-        'st_worker_time': 'metric_train_runtime',
-    })
-    df = df.rename(columns=columns_to_rename)
-
-    configuration_space = {
-        "lr": cs.loguniform(1e-4, 1e-1),
-        "batch_size": cs.logfinrange(8, 128, 5, cast_int=True),  # cs.choice([8, 16, 32, 64, 128]),
-        "num_cells": cs.randint(lower=1, upper=200),
-        "num_layers": cs.randint(lower=1, upper=4),
-        "st_instance_type": cs.choice(INSTANCE_TYPES),
-    }
-
-    # We set the maximum fidelity to be the minimum final fidelity across all learning curves gathered.
-    df['step'] = df.st_worker_iter + 1
-    Nmax = df.reset_index().groupby('trial_id').step.max().min()
-    Nmin = df.reset_index().groupby('trial_id').step.min().min()
-    fidelity_values = list(range(Nmin, Nmax + 1))
-    fidelity_space = dict(
-        step=cs.finrange(Nmin, Nmax, (Nmax - Nmin) + 1, cast_int=True),
-    )
-
-    serialize(
-        {
-            'electricity': BlackboxOffline(
-                df_evaluations=df,
-                configuration_space=configuration_space,
-                fidelity_space=fidelity_space,
-                fidelity_values=fidelity_values,
-                objectives_names=[METRIC_VALID_ERROR] + [col for col in df.columns if col.startswith("metric_")],
-            )
-        },
-        path=repository_path / BLACKBOX_NAME
-    )
-
-
 def import_deepar_cloud():
-    bb = load("deepar-cloud")
-    bb_dict = {'electricity': DeepARCloudBlackbox(bb=bb['electricity'])}
+    bb_dict = {'electricity': DeepARCloudBlackbox()}
     return bb_dict
-
-
-def generate_deepar_cloud(s3_root: Optional[str] = None):
-    serialize_deepar_cloud()
-    upload(name=BLACKBOX_NAME, s3_root=s3_root)
-
-
-if __name__ == '__main__':
-    generate_deepar_cloud()
