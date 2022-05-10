@@ -10,8 +10,6 @@ from syne_tune.blackbox_repository.blackbox import Blackbox
 import syne_tune.config_space as cs
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
 from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
-from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
-import syne_tune.experiments
 
 from adam_scripts.utils import (
     concatenate_syne_tune_experiment_results,
@@ -24,7 +22,7 @@ METRIC_VALID_ERROR = 'metric_training_loss'
 # This is cumulative time required for consuming the resource up until this point in training.
 METRIC_TIME_CUMULATIVE_RESOURCE = 'metric_train_runtime'
 
-LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES = (
+LEARNING_CURVE_SYNE_TUNE_JOB_NAMES = (
     'loss-lr-wd-bs-2-2022-02-07-23-13-30-781',
 )
 SPEED_SYNE_TUNE_JOB_NAMES = (
@@ -43,10 +41,14 @@ class HFCloudBlackbox(Blackbox):
     """
     Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
     """
-    def __init__(self):
-        df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
-        upload_df_to_team_bucket(df, BLACKBOX_ERROR_S3_PATH)
-
+    def __init__(self, reload_from_syne_tune_reports: bool = False):
+        """
+            :param: reload_from_syne_tune_reports: when True the data is reloaded from *_SYNE_TUNE_JOB_NAMES sources
+            and uploaded to the Syne team S3 bucket at BLACKBOX_*_S3_PATH
+        """
+        if reload_from_syne_tune_reports:
+            df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SYNE_TUNE_JOB_NAMES)
+            upload_df_to_team_bucket(df, BLACKBOX_ERROR_S3_PATH)
         df = pd.read_csv(BLACKBOX_ERROR_S3_PATH)
 
         # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
@@ -65,8 +67,9 @@ class HFCloudBlackbox(Blackbox):
         })
         df = df.rename(columns=columns_to_rename)
 
-        df_speed = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
-        upload_df_to_team_bucket(df_speed, BLACKBOX_SPEED_S3_PATH)
+        if reload_from_syne_tune_reports:
+            df_speed = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
+            upload_df_to_team_bucket(df_speed, BLACKBOX_SPEED_S3_PATH)
         df_speed = pd.read_csv(BLACKBOX_SPEED_S3_PATH)
 
         configuration_space = dict(

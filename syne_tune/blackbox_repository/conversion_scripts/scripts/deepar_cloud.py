@@ -6,12 +6,11 @@ import numpy as np
 
 from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
 
-from syne_tune.blackbox_repository import load, add_surrogate, serialize
+from syne_tune.blackbox_repository import add_surrogate
 from syne_tune.blackbox_repository.blackbox import Blackbox
 import syne_tune.config_space as cs
 from syne_tune.backend.sagemaker_backend.instance_info import InstanceInfos
-from syne_tune.blackbox_repository.blackbox_offline import serialize, BlackboxOffline
-from syne_tune.blackbox_repository.conversion_scripts.utils import repository_path, upload
+from syne_tune.blackbox_repository.blackbox_offline import BlackboxOffline
 
 from adam_scripts.utils import (
     concatenate_syne_tune_experiment_results,
@@ -24,7 +23,7 @@ METRIC_VALID_ERROR = 'mean_wQuantileLoss'
 # This is cumulative time required for consuming the resource up until this point in training.
 METRIC_TIME_CUMULATIVE_RESOURCE = 'metric_train_runtime'
 
-LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES = (
+LEARNING_CURVE_SYNE_TUNE_JOB_NAMES = (
     'deepar-curves-2022-04-25-10-46-32-616',
     'deepar-curves-2-2022-04-25-12-31-30-154',
     'deepar-curves-3-2022-04-25-12-32-14-346',
@@ -80,15 +79,20 @@ class DeepARCloudBlackbox(Blackbox):
     """
     Dataset generated using adam_scripts/launch_dataset_generation_gluonts.py
     """
-    def __init__(self):
+    def __init__(self, reload_from_syne_tune_reports: bool = False):
+        """
+            :param: reload_from_syne_tune_reports: when True the data is reloaded from *_SYNE_TUNE_JOB_NAMES sources
+            and uploaded to the Syne team S3 bucket at BLACKBOX_*_S3_PATH
+        """
         # In __init__ we set up 3 surrogates:
         # 1. Blackbox for the error, KNN(n_neighbors=3)
         # 2. Blackbox for the baseline training_runtime and instance_type, KNN(n_neighbors=1)
         # 3. Blackbox for the training_runtime correction for the target instance_type, KNN(n_neighbors=2)
 
         # 1. Blackbox for the error, KNN(n_neighbors=3)
-        df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SOURCE_SYNE_TUNE_JOB_NAMES)
-        upload_df_to_team_bucket(df, BLACKBOX_ERROR_S3_PATH)
+        if reload_from_syne_tune_reports:
+            df = concatenate_syne_tune_experiment_results(LEARNING_CURVE_SYNE_TUNE_JOB_NAMES)
+            upload_df_to_team_bucket(df, BLACKBOX_ERROR_S3_PATH)
         df = pd.read_csv(BLACKBOX_ERROR_S3_PATH)
 
         # Drop trials with duplicate entries, most likely due to this https://github.com/awslabs/syne-tune/issues/214
@@ -178,8 +182,9 @@ class DeepARCloudBlackbox(Blackbox):
         self.bb_training_runtime = add_surrogate(bb_training_runtime, surrogate=KNeighborsRegressor(n_neighbors=1), )
 
         # 3. Blackbox for the training_runtime correction for the target instance type, KNN(n_neighbors=2)
-        df = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
-        upload_df_to_team_bucket(df, BLACKBOX_SPEED_S3_PATH)
+        if reload_from_syne_tune_reports:
+            df = concatenate_syne_tune_experiment_results(SPEED_SYNE_TUNE_JOB_NAMES)
+            upload_df_to_team_bucket(df, BLACKBOX_SPEED_S3_PATH)
         df = pd.read_csv(BLACKBOX_SPEED_S3_PATH)
 
         columns_to_rename = {k: k.replace('config_', '') for k in df.columns if k.startswith('config_')}
