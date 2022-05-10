@@ -34,10 +34,10 @@ BLACKBOX_SPEED_S3_PATH = ('s3://mnemosyne-team-bucket/dataset/'
 BLACKBOX_ERROR_S3_PATH = ('s3://mnemosyne-team-bucket/dataset/'
                           'hf-distilbert-on-imdb-blackbox/hf-distilbert-on-imdb-blackbox-error.csv.zip')
 
-BLACKBOX_NAME = 'hf-cloud'
+BLACKBOX_NAME = 'hf-distilbert-on-imdb'
 
 
-class HFCloudBlackbox(Blackbox):
+class HFDistilbertOnImdbBlackbox(Blackbox):
     """
     Dataset generated using adam_scripts/launch_huggingface_sweep_ag.py
     """
@@ -74,8 +74,9 @@ class HFCloudBlackbox(Blackbox):
 
         configuration_space = dict(
             # We are setting batch_size to the values [4, 8, 12, 16] because that's the overlap of the
-            # per_device_train_batch_size field in the search spaces used for A) training curves/loss function values
-            # generation, and B) relative training speed generation.
+            # per_device_train_batch_size field in the search spaces used for
+            # A) training curves/loss function values generation, and
+            # B) relative training speed generation.
             per_device_train_batch_size=cs.finrange(4.0, 16.0, 4),  # [4, 8, 12, 16]
             learning_rate=cs.loguniform(1e-7, 1e-4),
             weight_decay=cs.loguniform(1e-6, 1e-2),
@@ -99,7 +100,7 @@ class HFCloudBlackbox(Blackbox):
                     objectives_names=['metric_training_loss', 'metric_train_runtime'],
                 )
 
-        super(HFCloudBlackbox, self).__init__(
+        super(HFDistilbertOnImdbBlackbox, self).__init__(
             configuration_space=configuration_space,
             fidelity_space=fidelity_space,
             fidelity_values=fidelity_values,
@@ -181,5 +182,5 @@ def instance_speed_cost(baseline_instance_type: str) -> Dict[Tuple[str, float], 
 
 
 def import_hf_cloud():
-    bb_dict = {'imdb': HFCloudBlackbox()}
+    bb_dict = {'imdb': HFDistilbertOnImdbBlackbox()}
     return bb_dict
