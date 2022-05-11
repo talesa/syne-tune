@@ -30,7 +30,7 @@ def download_cloudwatch_metrics_and_save_to_csv(
         elif force_download:
             print(f"File found on S3 but force_download=True, so processing {tuner_job_name}")
 
-        tuning_experiment_results = syne_tune.experiments.load_experiment(tuner_job_name)
+        tuning_experiment_results = syne_tune.experiments.load_experiment(tuner_job_name, force_download=force_download)
 
         trial_ids = tuning_experiment_results.results.trial_id.unique().tolist()
         print(f'Skipping the failed or missing trial_ids: {set(range(max(trial_ids) + 1)) - set(trial_ids)}', flush=True)
