@@ -23,7 +23,7 @@ from time import perf_counter
 from contextlib import contextmanager
 
 
-from syne_tune.constants import SYNE_TUNE_FOLDER
+from syne_tune.constants import DEFAULT_SYNE_TUNE_FOLDER
 
 
 class RegularCallback:
@@ -51,7 +51,7 @@ def experiment_path(
     :param tuner_name: name of a tuning experiment
     :param local_path: local path where results should be saved when running
         locally outside of Sagemaker, if not specified, then
-        `~/{SYNE_TUNE_FOLDER}/` is used.
+        `~/{DEFAULT_SYNE_TUNE_FOLDER}/` is used.
     :return: path where to write logs and results for Syne Tune tuner.
 
     On Sagemaker, results are written under "/opt/ml/checkpoints/" so that files are persisted
@@ -68,7 +68,7 @@ def experiment_path(
     else:
         # means we are running on a local machine, we store results in a local path
         if local_path is None:
-            local_path = Path(f"~/{SYNE_TUNE_FOLDER}").expanduser()
+            local_path = Path(f"~/{DEFAULT_SYNE_TUNE_FOLDER}").expanduser()
         else:
             local_path = Path(local_path)
         if tuner_name is not None:
@@ -77,20 +77,21 @@ def experiment_path(
 
 
 def s3_experiment_path(
-        s3_bucket: Optional[str] = None, experiment_name: Optional[str] = None,
+        s3_bucket: Optional[str] = None, syne_tune_folder: Optional[str] = None, experiment_name: Optional[str] = None,
         tuner_name: Optional[str] = None) -> str:
     """
     Returns S3 path for storing results and checkpoints.
+    The resulting path is s3://{s3_bucket}/{syne_tune_folder}/{experiment_name}/{tuner_name}
 
-    :param s3_bucket: If not given,, the default bucket for the SageMaker
-        session is used
+    :param s3_bucket: If not given, the default bucket for the SageMaker session is used
+    :param syne_tune_folder: If given, it is used instead of DEFAULT_SYNE_TUNE_FOLDER
     :param experiment_name: If given, this is used as first directory
     :param tuner_name: If given, this is used as second directory
     :return: S3 path
     """
     if s3_bucket is None:
         s3_bucket = sagemaker.Session().default_bucket()
-    s3_path = f"s3://{s3_bucket}/{SYNE_TUNE_FOLDER}"
+    s3_path = f"s3://{s3_bucket}/{syne_tune_folder if syne_tune_folder else DEFAULT_SYNE_TUNE_FOLDER}"
     for part in (experiment_name, tuner_name):
         if part is not None:
             s3_path += '/' + part

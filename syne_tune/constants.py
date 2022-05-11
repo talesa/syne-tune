@@ -15,7 +15,7 @@ Collects constants to be shared between core code and tuning scripts or
 benchmarks.
 """
 
-SYNE_TUNE_FOLDER = "syne-tune"
+DEFAULT_SYNE_TUNE_FOLDER = "syne-tune"
 
 ST_TUNER_CREATION_TIMESTAMP = "st_tuner_creation_timestamp"
 ST_TUNER_START_TIMESTAMP = "st_tuner_start_timestamp"
