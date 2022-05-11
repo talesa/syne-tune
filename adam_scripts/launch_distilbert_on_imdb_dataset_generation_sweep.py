@@ -45,31 +45,29 @@ if __name__ == '__main__':
     benchmark = distilbert_imdb_benchmark(default_params)
     mode = benchmark['mode']
     metric = benchmark['metric']
-    # config_space = benchmark['config_space']
 
-    # EDIT THIS SECTION
     random_seed = 31415927
 
     # instance_types = select_instance_type(min_gpu=1, max_cost_per_hour=10.0)
     instance_types = [
-        # 'ml.p3.2xlarge',
-        # 'ml.p2.xlarge',
-        # 'ml.p2.8xlarge',
-        # 'ml.g4dn.xlarge',
-        # 'ml.g4dn.2xlarge',
-        # 'ml.g4dn.4xlarge',
-        # 'ml.g4dn.8xlarge',
-        # 'ml.g4dn.12xlarge',
-        # 'ml.g5.xlarge',
+        'ml.p3.2xlarge',
+        'ml.p2.xlarge',
+        'ml.p2.8xlarge',
+        'ml.g4dn.xlarge',
+        'ml.g4dn.2xlarge',
+        'ml.g4dn.4xlarge',
+        'ml.g4dn.8xlarge',
+        'ml.g4dn.12xlarge',
+        'ml.g5.xlarge',
         'ml.g5.2xlarge',
         'ml.g5.4xlarge',
         'ml.g5.8xlarge',
         'ml.g5.12xlarge',
         'ml.g5.24xlarge',
-        # 'ml.p3.16xlarge',
-        # 'ml.p3dn.24xlarge',
-        # 'ml.p4d.24xlarge',
-        # 'ml.g5.48xlarge',
+        'ml.g5.48xlarge',
+        'ml.p3.16xlarge',
+        'ml.p3dn.24xlarge',
+        'ml.p4d.24xlarge',
     ]
 
     #       GPU  RAM max_bs_imdb
@@ -80,53 +78,22 @@ if __name__ == '__main__':
     # p3dn V100 32GB          68
     # p4d  A100 40GB          88
 
-    # instance_type_config_space = dict(
-    #     num_gpus=sp.logfinrange(1, 8, 3),  # [1, 4, 8]
-    #     num_vcpus=sp.logfinrange(1, 8, 4),  # [1, 2, 4, 8]
-    #     # num_vcpus=sp.logfinrange([1, 2, 4, 8, ...]),  # [1, 4, 8]
-    # )
-    # instance_type_config_space['num_gpus'].sample()
-
-    # tuner_job_name = 'test-g4dn-bs-26'
-
-    n_workers = 1
-    # single_job_max_run = 10 * 60  # 10min
-
-    # tuner_job_name = 'speed-bs-it-nw-p3dn-24'
-    # instance_types = ['ml.p3dn.24xlarge',]
-    # per_device_train_batch_size_list = [68]
-
-    # tuner_job_name = 'speed-bs-it-nw-p4d-24'
-    # instance_types = ['ml.p4d.24xlarge',]
-    # per_device_train_batch_size_list = [88]
-    single_job_max_run = 5 * 60  # 5min
-
-    # tuner_job_name = 'speed-bs-it-nw-g5-48'
-    # instance_types = ['ml.g5.48xlarge',]
-    # per_device_train_batch_size_list = [52]
-
-    tuner_job_name = 'speed-bs-it-nw-g5Xxlarge-bs52'
-    # instance_types = ['ml.g5.xlarge',]
-    per_device_train_batch_size_list = [52]
-
-    n_workers = 100
-
-
-    # per_device_train_batch_size_list = [4, 8, 16, 24, 32, 40, 48]
-    # dataloader_num_workers_list = list(range(2, 7))
-    # seeds = [0, 1, 2]
-
-    # per_device_train_batch_size_list = [52, 60, 68, 76, 84, 96]
-    # per_device_train_batch_size_list = [32]
-    dataloader_num_workers_list = [0, 1]
+    per_device_train_batch_size_list = [8, 16, 24, 32, 40, 48]
+    dataloader_num_workers_list = list(range(2, 7))
     seeds = [0, 1, 2]
-    # dataloader_num_workers_list = [0, 1, 2]
-    # seeds = [0, 1, 2]
+    n_workers = 1
+    tuner_job_name = 'speed-bs-it-nw'
+    single_job_max_run = 90 * 60
+    stop_criterion = StoppingCriterion(
+        # max_wallclock_time=10 * 60 * 60,
+        max_num_trials_finished=int(np.prod(
+            tuple(map(len, (per_device_train_batch_size_list, dataloader_num_workers_list, instance_types, seeds))))),
+        # max_num_trials_completed=1,
+    )
 
     config_space = dict(
-        per_device_train_batch_size=sp.choice(per_device_train_batch_size_list),  # TODO select me
-        # per_device_train_batch_size=26,
-        # fp16=1,
+        per_device_train_batch_size=sp.choice(per_device_train_batch_size_list),
+        # fp16=,
         n_train_data=25000,
         epochs=100,
         per_device_eval_batch_size=1,
@@ -136,15 +103,9 @@ if __name__ == '__main__':
         learning_rate=1e-6,
         weight_decay=1e-6,
         dataloader_num_workers=sp.choice(dataloader_num_workers_list),
-        st_instance_type=sp.choice(instance_types),  # TODO select me
-        # st_instance_type='ml.g4dn.xlarge',
-        seed=sp.choice(seeds),  # TODO select me
-        max_resource_level=default_params['max_resource_level'])
-    stop_criterion = StoppingCriterion(
-        # max_wallclock_time=10 * 60 * 60,  # 10h
-        max_num_trials_finished=int(np.prod(tuple(map(len, (per_device_train_batch_size_list, dataloader_num_workers_list, instance_types, seeds))))),
-        # max_num_trials_completed=1000,
-        # max_num_trials_completed=1,
+        st_instance_type=sp.choice(instance_types),
+        seed=sp.choice(seeds),
+        max_resource_level=default_params['max_resource_level'],
     )
 
     # tuner_job_name = 'loss-lr-wd-bs-2'
@@ -170,34 +131,6 @@ if __name__ == '__main__':
     #     max_wallclock_time=10 * 60 * 60,  # 10h
     #     max_num_trials_completed=100)
 
-    # tuner_job_name = 'dataloader-num-workers'
-    # points_to_evaluate = [dict(
-    #     learning_rate=1e-6,
-    #     weight_decay=1e-6,
-    #     dataloader_num_workers=dataloader_num_workers,
-    #     # st_instance_type=sp.choice(instance_types),
-    #     epochs=epochs,
-    #     # dataset_path=default_params['dataset_path'],
-    #     keep_in_memory=False,
-    #     log_interval=0,
-    #     eval_interval=0,
-    #     max_steps=default_params['max_resource_level']) for dataloader_num_workers in range(5)]
-
-    # tuner_job_name = 'keep-in-memory-true'
-    # points_to_evaluate = [dict(
-    #     learning_rate=1e-6,
-    #     weight_decay=1e-6,
-    #     dataloader_num_workers=0,
-    #     # st_instance_type=sp.choice(instance_types),
-    #     epochs=1,
-    #     # dataset_path=default_params['dataset_path'],
-    #     keep_in_memory=True,
-    #     log_interval=100,
-    #     eval_interval=0,
-    #     max_steps=default_params['max_resource_level']) for dataloader_num_workers in range(1)]
-    #
-    # n_workers = len(points_to_evaluate)
-
     metrics_to_be_defined = ('loss', 'learning_rate', 'epoch', 'eval_loss', 'eval_accuracy', 'eval_runtime',
                              'eval_samples_per_second', 'train_runtime', 'train_samples_per_second', 'elapsed_time')
     metric_definitions = [{'Name': k, 'Regex': f'{k}=([0-9\.]+)'} for k in metrics_to_be_defined]
@@ -207,8 +140,6 @@ if __name__ == '__main__':
     huggingface_estimator = HuggingFace(
         entry_point=str(benchmark['script']),
         # source_dir=str(script_path.parent)
-        # TODO you can try with instance-type='local'
-        # TODO make use of launch_hpo.py
         base_job_name='hpo-transformer',
         instance_type='ml.g5.xlarge',  # instance-type given here are override by value sampled from `st_instance_type`.
         max_run=single_job_max_run,  # timeout after 15min
@@ -219,8 +150,8 @@ if __name__ == '__main__':
         role=get_execution_role(),
         dependencies=[root / "benchmarking"],
         metric_definitions=metric_definitions,
-        # environment=dict(HF_DATASETS_OFFLINE='1', TRANSFORMERS_OFFLINE='1',),
-                         # TRANSFORMERS_CACHE='/opt/ml/input/data/hfcache'),
+        environment=dict(HF_DATASETS_OFFLINE='1', TRANSFORMERS_OFFLINE='1',
+                         TRANSFORMERS_CACHE='/opt/ml/input/data/hfcache'),
         disable_profiler=True,
         debugger_hook_config=False,
     )
@@ -229,10 +160,14 @@ if __name__ == '__main__':
     backend = SageMakerBackend(
         sm_estimator=huggingface_estimator,
         metrics_names=[metric],
+        # inputs={
+        #     'train':   's3://sagemaker-us-west-2-640549960621/samples/datasets/launch_huggingface_sweep_ag/train',
+        #     'eval':    's3://sagemaker-us-west-2-640549960621/samples/datasets/launch_huggingface_sweep_ag/eval',
+        #     'hfcache': 's3://sagemaker-us-west-2-640549960621/samples/hfcache'},
         inputs={
-            'train':   's3://sagemaker-us-west-2-640549960621/samples/datasets/launch_huggingface_sweep_ag/train',
-            'eval':    's3://sagemaker-us-west-2-640549960621/samples/datasets/launch_huggingface_sweep_ag/eval',
-            'hfcache': 's3://sagemaker-us-west-2-640549960621/samples/hfcache'},
+            'train': 's3://mnemosyne-team-bucket/AdamG/sweeps_resources/hugging-face/datasets/train',
+            'eval': 's3://mnemosyne-team-bucket/AdamG/sweeps_resources/hugging-face/datasets/eval',
+            'hfcache': 's3://mnemosyne-team-bucket/AdamG/sweeps_resources/hugging-face/hfcache'},
     )
 
     # Random search without stopping
@@ -241,7 +176,7 @@ if __name__ == '__main__':
         mode=mode,
         metric=metric,
         random_seed=random_seed,
-        # points_to_evaluate=points_to_evaluate,  # TODO dont miss this
+        # points_to_evaluate=points_to_evaluate,
     )
 
     tuner = Tuner(
@@ -256,7 +191,7 @@ if __name__ == '__main__':
 
     # remote_launcher = RemoteLauncher(
     #     tuner=tuner,
-    #     instance_type='ml.m5.large',  # TODO you can use instance_type='local'
+    #     instance_type='ml.m5.large',
     #     tuner_name=tuner_job_name,
     #     dependencies=[str(root / "benchmarking")],
     #     sleep_time=5.0,

@@ -88,9 +88,6 @@ if __name__ == '__main__':
         # 'ml.p3.8xlarge',
     ]
 
-    # instance_types = ['ml.c5n.18xlarge',]
-    # instance_types = ['ml.p3.2xlarge', ]
-
     config_space = {
         "lr": 1e-4,
         "epochs": 100,
@@ -117,9 +114,8 @@ if __name__ == '__main__':
     #     "only_benchmark_speed": 0,
     # }
     # tuner_name = 'deepar-curves-6'
-    # tuner_name = 'temp'
 
-    n_workers = 20
+    n_workers = 1
     # n_workers = int(len(instance_types) * 20 / 2)
 
     wallclock_time_budget = 3600 * 128
@@ -156,13 +152,12 @@ if __name__ == '__main__':
         # names of metrics to track. Each metric will be detected by Sagemaker if it is written in the
         # following form: "[RMSE]: 1.2", see in train_main_example how metrics are logged for an example
         metrics_names=[metric],
-        inputs={'train': 's3://sagemaker-us-west-2-640549960621/gluon-ts/datasets'},
+        # inputs={'train': 's3://sagemaker-us-west-2-640549960621/gluon-ts/datasets'},
+        inputs={'train': 's3://mnemosyne-team-bucket/AdamG/sweeps_resources/gluonts/datasets'},
     )
 
     scheduler = RandomSearch(
         config_space,
-        # max_t=epochs,
-        # resource_attr='epoch_no',
         mode='min',
         metric=metric
     )
@@ -181,14 +176,14 @@ if __name__ == '__main__':
     )
 
     # launch the tuning
-    # tuner.run()
+    tuner.run()
 
-    root = Path(syne_tune.__path__[0]).parent
-    remote_launcher = RemoteLauncher(
-        tuner=tuner,
-        # instance_type='ml.g4dn.xlarge',
-        instance_type='ml.m5.large',
-        tuner_name=tuner_name,
-        dependencies=[str(root / "benchmarking"), str(root / "syne_tune")],
-    )
-    remote_launcher.run(wait=False)
+    # root = Path(syne_tune.__path__[0]).parent
+    # remote_launcher = RemoteLauncher(
+    #     tuner=tuner,
+    #     # instance_type='ml.g4dn.xlarge',
+    #     instance_type='ml.m5.large',
+    #     tuner_name=tuner_name,
+    #     dependencies=[str(root / "benchmarking"), str(root / "syne_tune")],
+    # )
+    # remote_launcher.run(wait=False)
