@@ -130,7 +130,7 @@ def load_experiment(
         local_path: Optional[str] = None,
         force_download: bool = False,
         s3_bucket: Optional[str] = None,
-        syne_tune_folder: Optional[str] = None,
+        s3_syne_tune_folder: Optional[str] = None,
         experiment_name: str = None,
 ) -> ExperimentResult:
     """
@@ -146,14 +146,14 @@ def load_experiment(
     if force_download and download_if_not_found:
         logging.info(f"force_download=True so trying to download experiment {tuner_name} from s3.")
         download_single_experiment(
-            s3_bucket=s3_bucket, syne_tune_folder=syne_tune_folder,
+            s3_bucket=s3_bucket, syne_tune_folder=s3_syne_tune_folder,
             experiment_name=experiment_name, tuner_name=tuner_name)
 
     metadata_path = path / "metadata.json"
     if not(metadata_path.exists()) and download_if_not_found:
         logging.info(f"experiment {tuner_name} not found locally, trying to get it from s3.")
         download_single_experiment(
-            s3_bucket=s3_bucket, syne_tune_folder=syne_tune_folder,
+            s3_bucket=s3_bucket, syne_tune_folder=s3_syne_tune_folder,
             experiment_name=experiment_name, tuner_name=tuner_name)
     try:
         with open(metadata_path, "r") as f:
