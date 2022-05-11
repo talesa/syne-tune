@@ -25,28 +25,33 @@ if __name__ == '__main__':
     feature_combinations = (
         ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
         ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
-
-        ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
-        ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
-
-        ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',
-         'GPUFP32TFLOPS*num_gpu',),
-        ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS*num_gpu',),
-
-
-        ('instance_type_family', 'num_cpu', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
-        ('instance_type_family', 'cost_per_hour', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
-
-        ('instance_type_family', 'num_cpu', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
-        ('instance_type_family', 'cost_per_hour', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
+        #
+        # ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
+        # ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
+        #
+        # ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',
+        #  'GPUFP32TFLOPS*num_gpu',),
+        # ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS*num_gpu',),
+        #
+        #
+        # ('instance_type_family', 'num_cpu', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
+        # ('instance_type_family', 'cost_per_hour', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
+        #
+        # ('instance_type_family', 'num_cpu', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
+        # ('instance_type_family', 'cost_per_hour', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
 
         # ('instance_type_family', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
         # ('instance_type_family', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
         #
         # ('instance_type_family', 'config_per_device_train_batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
         # ('instance_type_family', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
+
+        # ('instance_type_family', 'num_gpu', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
     )
     deterministic_transform = 0
+    exclude_oom_runs = 0
+    # searcher = 'mobo'
+    searcher = 'random'
 
     experiments_names = []
     for features in feature_combinations:
@@ -54,10 +59,10 @@ if __name__ == '__main__':
         hash = random_string(4)
 
         sm_args = dict(
-            entry_point="launch_hf_cloud_speed_simulated.py",
+            entry_point="launch_distilbert_on_imdb_static_blackbox.py",
             source_dir=str(Path(__file__).parent),
             checkpoint_s3_uri=s3_experiment_path(experiment_name=experiment_tag),
-            instance_type="ml.c4.2xlarge",
+            instance_type="ml.m5.2xlarge",
             instance_count=1,
             py_version="py38",
             framework_version='1.10.0',
@@ -73,7 +78,8 @@ if __name__ == '__main__':
             'iters': 100,
             'max_cost': 60,
             'deterministic_transform': deterministic_transform,
-            'searcher': 'mobo',
+            'searcher': searcher,
+            'exclude_oom_runs': exclude_oom_runs,
         }
         est = PyTorch(**sm_args)
         est.fit(job_name=f"{experiment_tag}-{hash}", wait=False)

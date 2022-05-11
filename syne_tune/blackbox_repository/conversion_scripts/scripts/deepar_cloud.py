@@ -76,7 +76,7 @@ BLACKBOX_ERROR_S3_PATH = ('s3://mnemosyne-team-bucket/dataset/'
 
 class DeepARCloudBlackbox(Blackbox):
     """
-    Dataset generated using adam_scripts/launch_dataset_generation_gluonts.py
+    Dataset generated using adam_scripts/launch_deepar_gluonts_dataset_generation_sweep.py
     """
     def __init__(self, reload_from_syne_tune_reports: bool = False):
         """

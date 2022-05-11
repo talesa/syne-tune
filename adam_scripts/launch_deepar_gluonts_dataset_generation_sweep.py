@@ -96,7 +96,7 @@ if __name__ == '__main__':
         "epochs": 100,
         "num_cells": cs.choice([1, 50, 100, 150, 200]),
         "num_layers": cs.choice([1, 2, 3, 4]),
-        "batch_size": 128,
+        "batch_size": 32,
         "dataset": "electricity",
         "st_instance_type": cs.choice(instance_types),
         "only_benchmark_speed": 1,
