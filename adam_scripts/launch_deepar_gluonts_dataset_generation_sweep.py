@@ -132,8 +132,7 @@ if __name__ == '__main__':
 
     mode = "min"
     metric = "mean_wQuantileLoss"
-    # entry_point = Path(__file__).parent / "training_scripts" / "gluonts" / "train_gluonts.py"
-    entry_point = Path('/Users/awgol/code/syne-tune/examples/training_scripts/gluonts/train_gluonts.py')
+    entry_point = Path(__file__).parent.parent / "examples" / "training_scripts" / "gluonts" / "train_gluonts.py"
 
     trial_backend = SageMakerBackend(
         sm_estimator=MXNet(
