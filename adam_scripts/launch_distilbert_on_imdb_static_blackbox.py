@@ -34,6 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('-dt', '--deterministic_transform', type=int, default=0)
     parser.add_argument('-eo', '--exclude_oom_runs', type=int, default=0)
     parser.add_argument('-s', '--searcher', type=str, default='mobo')
+    parser.add_argument('-nw', '--n_workers', type=int, default=1)
 
     args, _ = parser.parse_known_args()
 
@@ -42,9 +43,6 @@ if __name__ == '__main__':
     # loading data and querying stuff
     bb_dict = import_hf_distilbert_on_imdb_static()
     blackbox = bb_dict["imdb"]
-
-    # simulating HPO
-    n_workers = 1
 
     elapsed_time_attr = 'st_worker_time'
 
@@ -91,7 +89,7 @@ if __name__ == '__main__':
             trial_backend=backend,
             scheduler=scheduler,
             stop_criterion=stop_criterion,
-            n_workers=n_workers,
+            n_workers=args.n_workers,
             sleep_time=0,
             # This callback is required in order to make things work with the
             # simulator callback. It makes sure that results are stored with
