@@ -29,7 +29,7 @@ if fixed_seed:
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('-f', '--features', nargs='+', required=True)
-    parser.add_argument('-i', '--iters', type=int, default=10)
+    parser.add_argument('-i', '--iters', type=int, default=1)
     parser.add_argument('-mc', '--max_cost', type=float, default=20.)
     parser.add_argument('-dt', '--deterministic_transform', type=int, default=0)
     parser.add_argument('-eo', '--exclude_oom_runs', type=int, default=0)
