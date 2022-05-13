@@ -26,8 +26,8 @@ if __name__ == '__main__':
         ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
         ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers',),
         #
-        # ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
-        # ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
+        ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
+        ('config_st_instance_type', 'GPUMemory/batch_size', 'config_dataloader_num_workers', 'GPUFP32TFLOPS',),
         #
         # ('config_st_instance_type', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',
         #  'GPUFP32TFLOPS*num_gpu',),
@@ -48,10 +48,14 @@ if __name__ == '__main__':
 
         # ('instance_type_family', 'num_gpu', 'config_per_device_train_batch_size', 'config_dataloader_num_workers',),
     )
-    deterministic_transform = 0
-    exclude_oom_runs = 0
-    # searcher = 'mobo'
-    searcher = 'random'
+    deterministic_transform = 1
+    exclude_oom_runs = 1
+    searcher = 'mobo'
+    # searcher = 'random'
+    n_workers = 1
+    # n_workers = 4
+    # iters = 100
+    iters = 1
 
     experiments_names = []
     for features in feature_combinations:
@@ -75,11 +79,12 @@ if __name__ == '__main__':
 
         sm_args["hyperparameters"] = {
             "features": ' '.join(features),
-            'iters': 100,
+            'iters': iters,
             'max_cost': 60,
             'deterministic_transform': deterministic_transform,
             'searcher': searcher,
             'exclude_oom_runs': exclude_oom_runs,
+            'n_workers': n_workers,
         }
         est = PyTorch(**sm_args)
         est.fit(job_name=f"{experiment_tag}-{hash}", wait=False)
