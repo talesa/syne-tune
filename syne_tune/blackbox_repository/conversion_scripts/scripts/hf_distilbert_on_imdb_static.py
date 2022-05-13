@@ -66,7 +66,7 @@ class HFDistilbertOnImdbStaticBlackbox(Blackbox):
     # p3dn V100 32GB          68
     # p4d  A100 40GB          88
 
-    def __init__(self, reload_from_syne_tune_reports: bool = True):
+    def __init__(self, reload_from_syne_tune_reports: bool = False):
         """
             :param: reload_from_syne_tune_reports: when True the data is reloaded from *_SYNE_TUNE_JOB_NAMES sources
             and uploaded to the Syne team S3 bucket at BLACKBOX_*_S3_PATH
